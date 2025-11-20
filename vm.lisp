@@ -69,17 +69,35 @@
 ;;; GESTION DES REGISTRES
 ;;; ============================================================================
 
+(defun map-old-register (reg)
+  "Convertit les anciens noms de registres vers les nouveaux (compatibilité)"
+  (case reg
+    (:R0 :$t0)
+    (:R1 :$t1)
+    (:R2 :$t2)
+    (:MEM :$t3)
+    (:GT :$gt)
+    (:LT :$lt)
+    (:EQ :$eq)
+    (:PL :$pc)
+    (:FP :$fp)
+    (:SP :$sp)
+    (:HP :$gp)
+    (t reg)))  ; Si pas de mapping, retourner tel quel
+
 (defun get-register (vm reg)
   "Lit la valeur d'un registre"
-  (unless (register-p reg)
-    (error "Registre invalide: ~A" reg))
-  (gethash reg (vm-registers vm)))
+  (let ((mapped-reg (map-old-register reg)))
+    (unless (register-p mapped-reg)
+      (error "Registre invalide: ~A" reg))
+    (gethash mapped-reg (vm-registers vm))))
 
 (defun set-register (vm reg value)
   "Écrit une valeur dans un registre"
-  (unless (register-p reg)
-    (error "Registre invalide: ~A" reg))
-  (setf (gethash reg (vm-registers vm)) value))
+  (let ((mapped-reg (map-old-register reg)))
+    (unless (register-p mapped-reg)
+      (error "Registre invalide: ~A" reg))
+    (setf (gethash mapped-reg (vm-registers vm)) value)))
 
 (defun dump-registers (vm)
   "Affiche tous les registres"
@@ -212,13 +230,22 @@
         (args (rest instr)))
     (case opcode
       ;; Instructions arithmétiques style MIPS
-      ;; Format: (ADD src1 src2 dest) -> dest = src1 + src2
-      (:ADD (let* ((src1 (first args))
-                   (src2 (second args))
-                   (dest (third args))
-                   (val1 (get-value vm src1))
-                   (val2 (get-value vm src2)))
-              (set-value vm dest (+ val1 val2))))
+      ;; Format MIPS: (ADD src1 src2 dest) -> dest = src1 + src2
+      ;; Format ancien (compatibilité): (ADD src dest) -> dest = dest + src
+      (:ADD (if (= (length args) 3)
+                ;; Format MIPS (3 opérandes)
+                (let* ((src1 (first args))
+                       (src2 (second args))
+                       (dest (third args))
+                       (val1 (get-value vm src1))
+                       (val2 (get-value vm src2)))
+                  (set-value vm dest (+ val1 val2)))
+                ;; Format ancien (2 opérandes) - compatibilité
+                (let* ((src (first args))
+                       (dest (second args))
+                       (val-src (get-value vm src))
+                       (val-dest (get-value vm dest)))
+                  (set-value vm dest (+ val-dest val-src)))))
       
       ;; Format: (ADDI src imm dest) -> dest = src + imm
       (:ADDI (let* ((src (first args))
@@ -227,22 +254,40 @@
                     (val (get-value vm src)))
                (set-value vm dest (+ val imm))))
       
-      (:SUB (let* ((src1 (first args))
-                   (src2 (second args))
-                   (dest (third args))
-                   (val1 (get-value vm src1))
-                   (val2 (get-value vm src2)))
-              (set-value vm dest (- val1 val2))))
+      (:SUB (if (= (length args) 3)
+                ;; Format MIPS (3 opérandes)
+                (let* ((src1 (first args))
+                       (src2 (second args))
+                       (dest (third args))
+                       (val1 (get-value vm src1))
+                       (val2 (get-value vm src2)))
+                  (set-value vm dest (- val1 val2)))
+                ;; Format ancien (2 opérandes) - compatibilité
+                (let* ((src (first args))
+                       (dest (second args))
+                       (val-src (get-value vm src))
+                       (val-dest (get-value vm dest)))
+                  (set-value vm dest (- val-dest val-src)))))
       
       ;; MUL style MIPS: résultat dans $hi:$lo
-      (:MUL (let* ((src1 (first args))
-                   (src2 (second args))
-                   (val1 (get-value vm src1))
-                   (val2 (get-value vm src2))
-                   (result (* val1 val2)))
-              ;; Pour simplifier, on met tout dans $lo
-              (set-value vm :$lo result)
-              (set-value vm :$hi 0)))
+      ;; Format MIPS: (MUL src1 src2) -> $hi:$lo = src1 * src2
+      ;; Format ancien: (MUL src dest) -> dest = dest * src
+      (:MUL (if (= (length args) 2)
+                ;; Format MIPS (2 opérandes) -> résultat dans $hi:$lo
+                (let* ((src1 (first args))
+                       (src2 (second args))
+                       (val1 (get-value vm src1))
+                       (val2 (get-value vm src2))
+                       (result (* val1 val2)))
+                  ;; Pour simplifier, on met tout dans $lo
+                  (set-value vm :$lo result)
+                  (set-value vm :$hi 0))
+                ;; Sinon traiter comme multiplication directe (ancien)
+                (let* ((src (first args))
+                       (dest (second args))
+                       (val-src (get-value vm src))
+                       (val-dest (get-value vm dest)))
+                  (set-value vm dest (* val-dest val-src)))))
       
       ;; DIV style MIPS: quotient dans $lo, reste dans $hi
       (:DIV (let* ((src1 (first args))
@@ -366,6 +411,32 @@
                 (let ((code-start (calculate-code-start vm)))
                   (set-register vm :$pc (+ code-start label))
                   (return-from execute-instruction)))))
+      
+      ;; JAL: Jump And Link (appel de fonction MIPS)
+      ;; Format: (JAL label)
+      ;; Effet: $ra = $pc + 1; $pc = code-start + label
+      (:JAL (let* ((label (first args))
+                   (code-start (calculate-code-start vm))
+                   (return-addr (1+ (get-register vm :$pc))))
+              (when (vm-verbose vm)
+                (format t "  JAL: Sauvegarde $ra=~A, saut vers ~A~%" 
+                        return-addr (+ code-start label)))
+              ;; Sauvegarder l'adresse de retour dans $ra
+              (set-register vm :$ra return-addr)
+              ;; Sauter au label
+              (set-register vm :$pc (+ code-start label))
+              (return-from execute-instruction)))
+      
+      ;; JR: Jump Register (retour de fonction MIPS)
+      ;; Format: (JR $rs)
+      ;; Effet: $pc = $rs
+      (:JR (let* ((reg (first args))
+                  (target-addr (get-value vm reg)))
+              (when (vm-verbose vm)
+                (format t "  JR: Retour à l'adresse ~A~%" target-addr))
+              ;; Sauter à l'adresse contenue dans le registre
+              (set-register vm :$pc target-addr)
+              (return-from execute-instruction)))
       
       ;; Compatibilité avec ancien format
       (:JMP (let* ((label (first args))

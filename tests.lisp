@@ -13,10 +13,10 @@
   (let ((vm (make-new-vm :verbose t)))
     (format t "VM créée avec succès~%")
     (format t "État: ~A~%" (vm-state vm))
-    (format t "SP: ~A~%" (get-register vm :SP))
-    (format t "FP: ~A~%" (get-register vm :FP))
-    (format t "HP: ~A~%" (get-register vm :HP))
-    (format t "PL: ~A~%" (get-register vm :PL))
+    (format t "$sp: ~A~%" (get-register vm :$sp))
+    (format t "$fp: ~A~%" (get-register vm :$fp))
+    (format t "$gp: ~A~%" (get-register vm :$gp))
+    (format t "$pc: ~A~%" (get-register vm :$pc))
     vm))
 
 (defun test-stack-operations ()
@@ -46,7 +46,7 @@
     (format t "Allocation mémoire: ~A octets~%" 10)
     (let ((addr (alloc-memory vm 10)))
       (format t "Adresse allouée: ~A~%" addr)
-      (format t "Nouveau HP: ~A~%" (get-register vm :HP)))
+      (format t "Nouveau $gp: ~A~%" (get-register vm :$gp)))
     (format t "Test réussi!~%")))
 
 (defun test-labels ()
@@ -191,6 +191,78 @@
                   :verbose t)
     (format t "Résultat attendu: 99~%")))
 
+(defun test-jal-jr ()
+  "Test de JAL (Jump And Link) et JR (Jump Register)"
+  (format t "~%=== TEST: JAL et JR (appel de fonction simple) ===~%")
+  (let ((vm (make-new-vm)))
+    (load-and-run vm
+                  '(;; Main
+                    (:LI 5 :$a0)           ; Argument 1
+                    (:LI 3 :$a1)           ; Argument 2
+                    (:JAL ADD_FUNC)        ; Appelle la fonction
+                    (:MOVE :$v0 :$t0)      ; Récupère le résultat
+                    (:PRINT :$t0)          ; Affiche le résultat
+                    (:HALT)
+                    
+                    ;; Fonction ADD_FUNC
+                    (:LABEL ADD_FUNC)
+                    (:ADD :$a0 :$a1 :$v0)  ; $v0 = $a0 + $a1
+                    (:JR :$ra))            ; Retour
+                  :verbose t)
+    (format t "Résultat attendu: 8 (5 + 3)~%")))
+
+(defun test-jal-jr-with-stack ()
+  "Test de JAL/JR avec sauvegarde de registres sur la pile"
+  (format t "~%=== TEST: JAL/JR avec sauvegarde pile ===~%")
+  (let ((vm (make-new-vm)))
+    (load-and-run vm
+                  '(;; Main
+                    (:LI 10 :$s0)          ; Variable sauvegardée
+                    (:LI 20 :$s1)          ; Variable sauvegardée
+                    (:LI 5 :$a0)           ; Argument
+                    (:JAL FUNC)            ; Appel fonction
+                    (:PRINT :$s0)          ; Vérifie $s0 non modifié (10)
+                    (:PRINT :$s1)          ; Vérifie $s1 non modifié (20)
+                    (:PRINT :$v0)          ; Résultat fonction
+                    (:HALT)
+                    
+                    ;; Fonction qui sauvegarde $s0
+                    (:LABEL FUNC)
+                    (:PUSH :$s0)           ; Sauvegarde $s0
+                    (:LI 100 :$s0)         ; Utilise $s0
+                    (:ADD :$a0 :$s0 :$v0)  ; $v0 = $a0 + $s0 = 5 + 100 = 105
+                    (:POP :$s0)            ; Restaure $s0
+                    (:JR :$ra))            ; Retour
+                  :verbose t)
+    (format t "Résultat attendu: 10, 20, 105~%")))
+
+(defun test-nested-calls ()
+  "Test d'appels de fonction imbriqués (A appelle B)"
+  (format t "~%=== TEST: Appels imbriqués (A appelle B) ===~%")
+  (let ((vm (make-new-vm)))
+    (load-and-run vm
+                  '(;; Main
+                    (:LI 5 :$a0)           ; Argument
+                    (:JAL FUNC_A)          ; Appelle A
+                    (:PRINT :$v0)          ; Résultat final
+                    (:HALT)
+                    
+                    ;; Fonction A qui appelle B
+                    (:LABEL FUNC_A)
+                    (:PUSH :$ra)           ; Sauvegarde $ra (important!)
+                    (:ADDI :$a0 10 :$a0)   ; $a0 = $a0 + 10 = 15
+                    (:JAL FUNC_B)          ; Appelle B
+                    (:ADDI :$v0 5 :$v0)    ; $v0 = $v0 + 5
+                    (:POP :$ra)            ; Restaure $ra
+                    (:JR :$ra)             ; Retour au main
+                    
+                    ;; Fonction B
+                    (:LABEL FUNC_B)
+                    (:ADDI :$a0 2 :$v0)    ; $v0 = $a0 + 2 = 17
+                    (:JR :$ra))            ; Retour à A
+                  :verbose t)
+    (format t "Résultat attendu: 22 (5 + 10 + 2 + 5)~%")))
+
 ;;; ============================================================================
 ;;; SUITE DE TESTS COMPLÈTE
 ;;; ============================================================================
@@ -215,6 +287,9 @@
         (test-move-and-load)
         (test-stack-with-registers)
         (test-comparison-branches)
+        (test-jal-jr)
+        (test-jal-jr-with-stack)
+        (test-nested-calls)
         (run-all-tests)
         
         (format t "~%")
@@ -233,4 +308,5 @@
 
 (export '(test-vm-basic test-stack-operations test-memory-operations
           test-labels test-execution-simple test-execution-complex
-          test-conditional-jump test-comparison run-all-vm-tests))
+          test-conditional-jump test-comparison test-jal-jr
+          test-jal-jr-with-stack test-nested-calls run-all-vm-tests))

@@ -94,7 +94,9 @@
     :$pc                  ; Program Counter (comme PL)
     :$hi :$lo             ; Pour multiplication/division
     ;; Flags de comparaison (extension)
-    :$gt :$lt :$eq)       ; Flags de comparaison
+    :$gt :$lt :$eq        ; Flags de comparaison
+    ;; COMPATIBILITÉ: Anciens noms de registres
+    :R0 :R1 :R2 :MEM :GT :LT :EQ :PL :FP :SP :HP)
   "Liste des noms de registres MIPS")
 
 ;;; ============================================================================
@@ -137,7 +139,7 @@
     ;; 0 arguments
     ((:NOP :HALT :RET) 0)
     ;; 1 argument
-    ((:J :JMP :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
+    ((:J :JMP :JAL :JR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
       :MFLO :MFHI) 1)
     ;; 2 arguments
     ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP) 2)
@@ -164,10 +166,18 @@
         (args (rest instr)))
     (unless (opcode-p opcode)
       (error "Opcode invalide: ~A" opcode))
-    (let ((expected-arity (instruction-arity opcode)))
-      (unless (= (length args) expected-arity)
-        (error "Nombre d'arguments incorrect pour ~A: attendu ~A, reçu ~A"
-               opcode expected-arity (length args)))))
+    ;; Instructions avec arité variable (compatibilité)
+    (case opcode
+      ((:ADD :SUB) (unless (or (= (length args) 2) (= (length args) 3))
+                     (error "Nombre d'arguments incorrect pour ~A: attendu 2 ou 3, reçu ~A"
+                            opcode (length args))))
+      ((:MUL) (unless (or (= (length args) 2))
+                (error "Nombre d'arguments incorrect pour ~A: attendu 2, reçu ~A"
+                       opcode (length args))))
+      (t (let ((expected-arity (instruction-arity opcode)))
+           (unless (= (length args) expected-arity)
+             (error "Nombre d'arguments incorrect pour ~A: attendu ~A, reçu ~A"
+                    opcode expected-arity (length args)))))))
   t)
 
 (defun validate-program (program)

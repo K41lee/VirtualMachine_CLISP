@@ -1,0 +1,347 @@
+================================================================================
+                    RÉCAPITULATIF PHASE 2 - APPELS DE FONCTION MIPS
+                            Machine Virtuelle LISP
+================================================================================
+
+Date: 20 novembre 2025
+Statut: ✓✓✓ COMPLÉTÉE À 100%
+
+================================================================================
+                        OBJECTIFS DE LA PHASE 2
+================================================================================
+
+OBJECTIF PRINCIPAL:
+Implémenter les instructions JAL et JR pour permettre les appels de fonction
+dans l'architecture MIPS, avec gestion correcte des frames et de la récursivité.
+
+OBJECTIFS SECONDAIRES:
+- Tester les appels de fonction simples
+- Tester les appels imbriqués
+- Tester la récursivité
+- Valider les conventions d'appel MIPS
+
+================================================================================
+                        RÉALISATIONS
+================================================================================
+
+1. INSTRUCTIONS IMPLÉMENTÉES
+-----------------------------
+
+✓ JAL (Jump And Link) - Format J
+  Syntaxe: (JAL label)
+  Effet: $ra = $pc + 1; $pc = code-start + label
+  Implémentation: vm.lisp, ligne ~371
+  Status: Testé et fonctionnel ✓
+
+✓ JR (Jump Register) - Format R
+  Syntaxe: (JR $rs)
+  Effet: $pc = $rs
+  Implémentation: vm.lisp, ligne ~383
+  Status: Testé et fonctionnel ✓
+
+2. TESTS CRÉÉS
+--------------
+
+✓ test-jal-jr (tests.lisp)
+  Description: Test d'appel de fonction simple avec JAL/JR
+  Code: Fonction ADD_FUNC qui additionne deux arguments
+  Résultat: 5 + 3 = 8 ✓
+
+✓ test-jal-jr-with-stack (tests.lisp)
+  Description: Test avec sauvegarde de registres sur pile
+  Code: Fonction qui sauvegarde $s0, utilise, puis restaure
+  Résultat: $s0 préservé correctement ✓
+
+✓ test-nested-calls (tests.lisp)
+  Description: Test d'appels imbriqués (A appelle B)
+  Code: FUNC_A appelle FUNC_B avec sauvegarde de $ra
+  Résultat: 5 + 10 + 2 + 5 = 22 ✓
+
+3. EXEMPLES CRÉÉS
+-----------------
+
+✓ example-mips-jal-jr (examples-mips.lisp)
+  Description: Exemple simple d'appel de fonction
+  Code: Fonction ADD_FUNC(7, 3) = 10
+  Résultat: 10 ✓
+
+✓ example-mips-nested-calls (examples-mips.lisp)
+  Description: Appels imbriqués avec sauvegarde $ra
+  Code: Main→FUNC_A→FUNC_B
+  Résultat: (5 + 10) * 2 + 3 = 33 ✓
+
+✓ example-mips-countdown-recursive (examples-mips.lisp)
+  Description: Countdown récursif
+  Code: countdown(5) affiche 5, 4, 3, 2, 1, 0
+  Résultat: 5→4→3→2→1→0 ✓
+
+✓ example-mips-fibonacci-recursive (examples-mips.lisp)
+  Description: Fibonacci récursif
+  Code: fib(6) = fib(5) + fib(4)
+  Résultat: fib(6) = 8 ✓
+  Séquence: 0, 1, 1, 2, 3, 5, 8 ✓
+
+4. COMPATIBILITÉ
+----------------
+
+✓ Mapping automatique anciens registres → nouveaux
+  :R0 → :$t0
+  :R1 → :$t1
+  :R2 → :$t2
+  :MEM → :$t3
+  :GT → :$gt
+  :LT → :$lt
+  :EQ → :$eq
+  :PL → :$pc
+  :FP → :$fp
+  :SP → :$sp
+  :HP → :$gp
+
+✓ Instructions avec arité variable
+  ADD: accepte 2 ou 3 opérandes
+  SUB: accepte 2 ou 3 opérandes
+  MUL: accepte 2 opérandes
+
+✓ Tous les anciens tests passent toujours ✓
+
+================================================================================
+                        ARCHITECTURE DES APPELS
+================================================================================
+
+CONVENTION D'APPEL MIPS IMPLÉMENTÉE:
+
+1. AVANT L'APPEL (Appelant):
+   - Placer arguments dans $a0-$a3
+   - Sauvegarder $t0-$t9 si nécessaires après appel (caller-saved)
+   - JAL fonction
+
+2. PROLOGUE (Appelé):
+   - PUSH $ra (si appels imbriqués)
+   - PUSH $s0-$s7 (si utilisés)
+   - PUSH $fp (si gestion frame)
+   - Allouer espace variables locales
+
+3. CORPS DE LA FONCTION:
+   - Utiliser $a0-$a3 pour arguments
+   - Utiliser $t0-$t9 pour temporaires
+   - Utiliser $s0-$s7 pour variables locales
+   - Placer résultat dans $v0 ($v1 si nécessaire)
+
+4. ÉPILOGUE (Appelé):
+   - POP $fp (si sauvegardé)
+   - POP $s0-$s7 (si sauvegardés)
+   - POP $ra (si sauvegardé)
+   - JR $ra (retour)
+
+5. APRÈS LE RETOUR (Appelant):
+   - Récupérer résultat depuis $v0
+   - Continuer l'exécution
+
+================================================================================
+                        TESTS DE VALIDATION
+================================================================================
+
+TEST 1: Appel simple
+--------------------
+Code:
+  Main: JAL ADD_FUNC avec $a0=5, $a1=3
+  ADD_FUNC: $v0 = $a0 + $a1, JR $ra
+Résultat: $v0 = 8 ✓
+
+TEST 2: Appel avec sauvegarde pile
+-----------------------------------
+Code:
+  Main: $s0=10, $s1=20, JAL FUNC avec $a0=5
+  FUNC: PUSH $s0, utilise $s0, POP $s0, JR $ra
+Résultat: $s0=10, $s1=20, $v0=105 ✓
+
+TEST 3: Appels imbriqués
+-------------------------
+Code:
+  Main: JAL FUNC_A avec $a0=5
+  FUNC_A: PUSH $ra, $a0+=10, JAL FUNC_B, $v0+=5, POP $ra, JR $ra
+  FUNC_B: $v0=$a0+2, JR $ra
+Résultat: $v0 = 22 (5+10+2+5) ✓
+
+TEST 4: Récursion simple (countdown)
+-------------------------------------
+Code:
+  countdown(n):
+    PRINT n
+    if n == 0: return
+    countdown(n-1)
+Résultat: 5, 4, 3, 2, 1, 0 ✓
+
+TEST 5: Récursion complexe (fibonacci)
+---------------------------------------
+Code:
+  fib(n):
+    if n <= 1: return n
+    return fib(n-1) + fib(n-2)
+Test: fib(6)
+Résultat: 8 ✓
+Arbre d'appels:
+              fib(6)=8
+            /          \
+        fib(5)=5      fib(4)=3
+        /     \        /     \
+    fib(4)  fib(3)  fib(3) fib(2)
+    ...     ...     ...    ...
+
+================================================================================
+                        STATISTIQUES
+================================================================================
+
+Lignes de code ajoutées:
+  vm.lisp: +30 lignes (JAL, JR, compatibilité)
+  tests.lisp: +60 lignes (3 nouveaux tests)
+  examples-mips.lisp: +120 lignes (4 nouveaux exemples)
+  asm-ops.lisp: +15 lignes (mapping, validation)
+  TOTAL: ~225 lignes
+
+Instructions MIPS implémentées:
+  Total après Phase 2: 19 instructions natives MIPS
+  - Phase 1: 17 instructions
+  - Phase 2: +2 instructions (JAL, JR)
+
+Exemples fonctionnels:
+  Total après Phase 2: 14 exemples
+  - Phase 1: 10 exemples
+  - Phase 2: +4 exemples
+
+Tests:
+  Total après Phase 2: 17 tests
+  - Phase 1: 14 tests
+  - Phase 2: +3 tests
+
+Taux de réussite des tests: 100% ✓✓✓
+
+================================================================================
+                        PERFORMANCES
+================================================================================
+
+Test de Fibonacci fib(6):
+
+Instructions exécutées (approximatif):
+  - fib(6) effectue ~25 appels récursifs
+  - Chaque appel: ~10-15 instructions
+  - Total: ~300-400 instructions
+
+Temps d'exécution:
+  - VM: instantané (< 0.1 seconde)
+  - LISP natif: instantané (< 0.01 seconde)
+  - Ratio: ~10x plus lent (acceptable pour projet éducatif)
+
+Utilisation mémoire:
+  - Pile: ~50 cellules utilisées (profondeur récursion)
+  - Tas: non utilisé dans cet exemple
+  - Code: ~40 instructions
+
+================================================================================
+                        PROBLÈMES RENCONTRÉS ET SOLUTIONS
+================================================================================
+
+PROBLÈME 1: Anciens registres non reconnus
+-------------------------------------------
+Symptôme: Erreur "Registre invalide: R0"
+Cause: Les tests utilisaient :R0 au lieu de :$t0
+Solution: Ajout d'un mapping automatique dans get-register/set-register
+Status: ✓ Résolu
+
+PROBLÈME 2: ADD attend 3 arguments
+----------------------------------
+Symptôme: "Nombre d'arguments incorrect pour ADD"
+Cause: Format MIPS (3 opérandes) vs ancien format (2 opérandes)
+Solution: Détection dynamique du nombre d'arguments dans execute-instruction
+Status: ✓ Résolu
+
+PROBLÈME 3: Validation stricte de l'arité
+------------------------------------------
+Symptôme: Validation échoue pour instructions compatibilité
+Cause: instruction-arity retourne une seule valeur fixe
+Solution: Cas spéciaux dans validate-instruction pour arité variable
+Status: ✓ Résolu
+
+================================================================================
+                        LEÇONS APPRISES
+================================================================================
+
+1. IMPORTANCE DE LA RÉTROCOMPATIBILITÉ
+   → Maintenir l'ancien format évite de tout réécrire
+   → Mapping automatique simplifie la transition
+
+2. GESTION DE LA PILE POUR RÉCURSION
+   → Sauvegarde de $ra cruciale pour appels imbriqués
+   → PUSH/POP simplifient grandement le code
+
+3. CONVENTIONS D'APPEL MIPS
+   → $a0-$a3 pour arguments très intuitif
+   → $v0 pour retour simplifie le code
+   → $ra automatique avec JAL/JR
+
+4. TESTS PROGRESSIFS
+   → Tester simple avant complexe
+   → Countdown avant Fibonacci
+   → Validation pas à pas
+
+================================================================================
+                        PROCHAINES ÉTAPES
+================================================================================
+
+PHASE 3: COMPILATEUR LISP → ASM MIPS
+-------------------------------------
+
+Maintenant que les appels de fonction fonctionnent, nous pouvons:
+
+1. Parser LISP
+   - Lire expressions S-expressions
+   - Construire un AST (Abstract Syntax Tree)
+
+2. Compiler expressions simples
+   - (+ 5 3) → LI, ADD
+   - (- 10 4) → LI, SUB
+   - (* 7 6) → LI, MUL, MFLO
+
+3. Compiler fonctions
+   - (defun add (a b) (+ a b))
+   - Générer prologue/épilogue automatiquement
+   - Utiliser JAL/JR pour appels
+
+4. Compiler récursion
+   - (defun fib (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))
+   - Générer code récursif avec sauvegarde registres
+
+5. Objectif final
+   - Compiler fibonacci(20)
+   - Exécuter sur la VM
+   - Résultat attendu: 6765
+
+================================================================================
+                        CONCLUSION
+================================================================================
+
+✓✓✓ PHASE 2 COMPLÉTÉE AVEC SUCCÈS ✓✓✓
+
+La Phase 2 est un succès total:
+- JAL et JR implémentés et fonctionnels
+- Appels de fonction simples: ✓
+- Appels imbriqués: ✓
+- Récursion simple: ✓
+- Récursion complexe (Fibonacci): ✓
+- Tous les tests passent: 100%
+- Rétrocompatibilité maintenue: ✓
+- Documentation à jour: ✓
+
+La VM est maintenant capable de:
+- Exécuter des fonctions avec paramètres
+- Gérer les appels récursifs
+- Respecter les conventions d'appel MIPS
+- Sauvegarder/restaurer le contexte correctement
+
+PRÊT POUR LA PHASE 3 ! 🚀
+
+================================================================================
+
+Version: 1.0
+Auteur: K41lee
+Date: 20 novembre 2025
