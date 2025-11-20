@@ -422,31 +422,220 @@ PROCHAINES ÉTAPES - PHASE 3 : COMPILATEUR LISP → ASM MIPS
 ================================================================================
 
 ================================================================================
-PHASE 5 : COMPILATEUR LISP → ASM MIPS
+PHASE 5 : COMPILATEUR LISP → ASM MIPS ✓✓✓ COMPLÉTÉE
 ================================================================================
+Date de finalisation: 20 novembre 2025
 
-À implémenter après Phase 2 :
-□ compiler.lisp : fichier principal du compilateur
-□ Analyse du code source LISP (AST)
-□ Environnement de compilation (variables, fonctions)
-□ Compilation expressions arithmétiques simples
-□ Compilation structures de contrôle (if, cond, etc.)
-□ Compilation définition de fonctions (defun)
-□ Compilation appels de fonction (avec JAL/JR)
-□ Compilation fonctions récursives
+Étape 5.1 : Structure du compilateur ✓
+---------------------------------------
+✓ compiler.lisp créé avec dépendances (vm.lisp, loader.lisp)
+✓ Variables globales pour registres MIPS (*reg-v0*, *reg-a0*, etc.)
+✓ Workaround bug CLISP : symboles :$xxx via (get-reg :v0)
 
-Étapes de développement :
-1. Parser LISP simple (S-expressions)
-2. Compiler expressions arithmétiques : (+ 5 3) → LI, ADD
-3. Compiler variables locales : (let ((x 5)) ...)
-4. Compiler if/then/else : (if test then else)
-5. Compiler fonctions simples : (defun add (a b) (+ a b))
-6. Compiler appels : (add 5 3)
-7. Compiler récursion : (defun fib (n) ...)
+Étape 5.2 : Parser LISP ✓
+--------------------------
+✓ parse-expr : analyse S-expressions
+✓ Détection types : constante, variable, opération, if, defun, appel
+✓ Support :
+  - Constantes : 42, -10, 0
+  - Opérations : +, -, *, /, mod, <, <=, >, >=, =
+  - If : (if test then else)
+  - Defun : (defun name (params...) body)
+  - Appels : (func arg1 arg2)
 
-Objectif final :
-→ Compiler et exécuter fibonacci(20)
-→ Résultat attendu: 6765
+Étape 5.3 : Environnement de compilation ✓
+-------------------------------------------
+✓ Structure environnement avec hash-tables
+✓ env-add-var : ajouter variable locale
+✓ env-lookup-var : rechercher variable
+✓ env-add-func : enregistrer fonction
+✓ env-lookup-func : rechercher fonction
+✓ Gestion compteur labels uniques
+
+Étape 5.4 : Compilation expressions arithmétiques ✓
+---------------------------------------------------
+✓ compile-constant : (5) → (LI 5 $V0)
+✓ compile-arithmetic : (+ 5 3) → (LI 5 $T0) (LI 3 $T1) (ADD $T0 $T1 $V0)
+✓ Support opérations :
+  - Addition : + → ADD
+  - Soustraction : - → SUB
+  - Multiplication : * → MUL, MFLO
+  - Division : / → DIV, MFLO
+  - Modulo : mod → DIV, MFHI
+✓ Allocation registres temporaires $t0-$t9
+✓ Résultat dans $v0
+
+Étape 5.5 : Compilation comparaisons ✓
+---------------------------------------
+✓ compile-comparison : (< x y) → SLT/BEQ/BNE
+✓ Support opérateurs :
+  - < : less than (SLT)
+  - <= : less or equal
+  - > : greater than
+  - >= : greater or equal
+  - = : equal (BEQ)
+✓ Résultat dans $v0 (0 ou 1)
+
+Étape 5.6 : Compilation IF/THEN/ELSE ✓
+---------------------------------------
+✓ compile-if : (if test then else)
+✓ Génération labels uniques (:IF_THEN_xxx, :IF_ELSE_xxx, :IF_END_xxx)
+✓ Structure :
+  - Compiler test
+  - BEQ $v0 $zero :IF_ELSE
+  - Compiler then
+  - JMP :IF_END
+  - :IF_ELSE
+  - Compiler else
+  - :IF_END
+✓ Testé avec exemples if simples
+
+Étape 5.7 : Compilation fonctions (DEFUN) ✓✓✓
+---------------------------------------------
+✓ compile-defun : (defun name (params) body)
+✓ Prologue de fonction :
+  - LABEL nom_fonction
+  - ADDI $SP -frame_size $SP (allouer frame)
+  - SW $RA $SP 0 (sauvegarder adresse retour)
+  - SW $A0-$A3 $SP offset (sauvegarder arguments)
+  - LW $SP offset $S0-$S7 (charger paramètres)
+
+✓ Corps de fonction :
+  - Mapper paramètres → registres $s0-$s7
+  - Compiler body avec environnement
+  - Résultat dans $v0
+
+✓ Épilogue de fonction :
+  - LW $SP 0 $RA (restaurer adresse retour)
+  - ADDI $SP +frame_size $SP (libérer frame)
+  - JR $RA (retourner à l'appelant)
+
+✓ Formats instructions corrigés :
+  - LW : (LW base offset dest) ✓
+  - SW : (SW src base offset) ✓
+  - ADDI : (ADDI src imm dest) ✓
+
+Étape 5.8 : Compilation appels de fonction ✓✓✓
+-----------------------------------------------
+✓ compile-call : (func arg1 arg2)
+✓ Placer arguments dans $a0-$a3
+✓ JAL vers label fonction
+✓ Résultat dans $v0
+✓ Architecture code avec JMP :MAIN :
+  - JMP :MAIN (sauter définitions)
+  - Définitions fonctions
+  - LABEL :MAIN (point d'entrée)
+  - Code principal
+  - HALT
+
+Étape 5.9 : Résolution labels et adresses ✓
+--------------------------------------------
+✓ collect-labels : adresses absolues (code-start + offset)
+✓ resolve-labels : remplacement symboles
+✓ JAL/JMP avec test adresses mixtes :
+  - Si addr >= code-start : déjà absolu
+  - Sinon : code-start + addr
+✓ Corrige double-addition code-start
+
+Étape 5.10 : Tests et validation ✓✓✓
+-------------------------------------
+✓ test-compiler-constant : 42 → 42 ✓
+✓ test-compiler-addition : (+ 5 3) → 8 ✓
+✓ test-compiler-if : (if (< 5 10) 100 200) → 100 ✓
+✓ test-compiler-simple-function : (defun double (x) (* x 2)) (double 21) → 42 ✓✓✓
+
+DÉTAILS TEST DOUBLE(21) = 42:
+----------------------------
+Code généré :
+  JMP MAIN              ; Saut vers code principal
+  LABEL DOUBLE          ; Définition fonction
+  ADDI $SP -8 $SP       ; Allouer frame (8 octets)
+  SW $RA $SP 0          ; Sauvegarder $ra
+  SW $A0 $SP 4          ; Sauvegarder argument
+  LW $SP 4 $S0          ; Charger paramètre x → $s0
+  MOVE $S0 $V0          ; x → $v0
+  MOVE $V0 $T0          ; $v0 → $t0
+  LI 2 $V0              ; 2 → $v0
+  MOVE $V0 $T1          ; 2 → $t1
+  MUL $T0 $T1           ; $t0 * $t1 → $hi:$lo
+  MFLO $V0              ; $lo → $v0 (résultat)
+  LW $SP 0 $RA          ; Restaurer $ra
+  ADDI $SP 8 $SP        ; Libérer frame
+  JR $RA                ; Retourner
+  LABEL MAIN            ; Point d'entrée
+  LI 21 $V0             ; 21 → $v0
+  MOVE $V0 $A0          ; 21 → $a0 (argument)
+  JAL DOUBLE            ; Appeler double
+  PRINT $V0             ; Afficher résultat
+  HALT                  ; Arrêter
+
+Trace d'exécution (19 instructions):
+  [0] JMP 5014 → PC=5014 (saut vers MAIN)
+  [1-3] Préparation argument (LI 21, MOVE)
+  [4] JAL 5001 → $RA=5017, PC=5001 (appel fonction)
+  [5-7] Prologue (ADDI, SW $RA, SW $A0)
+  [8-13] Corps fonction (multiplication)
+  [14-16] Épilogue (LW $RA, ADDI, JR)
+  [17] PRINT → affiche "42"
+  [18] HALT
+
+Registres finaux :
+  $V0 = 42 ✓ (résultat correct)
+  $A0 = 21 ✓ (argument préservé)
+  $S0 = 21 ✓ (paramètre)
+  $RA = 5017 ✓ (adresse retour)
+  $PC = 5018 ✓ (après HALT)
+  $SP = 4999 ✓ (pile restaurée)
+
+État final :
+→ ✓✓✓ TEST RÉUSSI : double(21) = 42
+→ ✓✓✓ Passage paramètres fonctionnel
+→ ✓✓✓ Appel fonction avec JAL/JR fonctionnel
+→ ✓✓✓ Prologue/épilogue corrects
+→ ✓✓✓ Pile gérée correctement
+
+Étape 5.11 : Corrections bugs CLISP ✓
+--------------------------------------
+✓ Bug $ découvert : :$sp tapé → :|| (symbole vide)
+✓ Solution : Variables globales *reg-xxx* initialisées via get-reg
+✓ Tous littéraux :$xxx remplacés dans :
+  - compiler.lisp (variables globales)
+  - vm.lisp (instructions JAL, JR, JMP, JZ, JNZ, JGT, JLT, CMP)
+  - loader.lisp (initialisation PC)
+✓ Pattern systématique : (let ((pc-reg (get-reg :pc))) ...)
+✓ Zéro littéral :$xxx dans code source ✓
+
+Étape 5.12 : Corrections instructions ✓
+---------------------------------------
+✓ Format LW : (LW base offset dest) - ordre corrigé
+✓ Format SW : (SW src base offset) - ordre corrigé
+✓ Résolution labels : adresses absolues au lieu de relatives
+✓ JAL/JMP : test adresse absolue/relative pour éviter double-addition
+✓ Architecture code : JMP :MAIN au début pour ordre correct
+
+PROBLÈMES RÉSOLUS:
+------------------
+✓ Bug 1 : Format LW incorrect → corrigé
+✓ Bug 2 : Résolution labels relative → adresses absolues
+✓ Bug 3 : JAL double-ajout code-start → test if addr >= code-start
+✓ Bug 4 : Code démarre dans fonction → JMP :MAIN ajouté
+✓ Bug 5 : JMP double-addition → même test que JAL
+✓ Bug 6 : Littéraux :$xxx CLISP → workaround complet
+
+VALIDATION FINALE:
+------------------
+✓✓✓ COMPILATEUR LISP → MIPS PLEINEMENT FONCTIONNEL
+✓✓✓ Chargement code → Exécution → Résultat correct
+✓✓✓ Passage paramètres validé
+✓✓✓ Appels fonction validés
+✓✓✓ Gestion pile validée
+✓✓✓ Prêt pour fibonacci récursif
+
+PROCHAINE ÉTAPE:
+----------------
+→ Tester fibonacci récursif : (defun fib (n) (if (<= n 1) n (+ (fib (- n 1)) (fib (- n 2)))))
+→ Valider avec fib(3), fib(5), fib(10)
+→ Objectif final : fib(20) = 6765
 
 ================================================================================
 NOTES ET REMARQUES
@@ -495,30 +684,268 @@ Documentation créée :
 RÉSUMÉ ÉTAT ACTUEL (20 novembre 2025)
 ================================================================================
 
-✓✓✓ PHASE 1 : Structure de base          - 100% COMPLÉTÉE
-✓✓✓ PHASE 2 : Machine virtuelle           - 100% COMPLÉTÉE
-✓✓✓ PHASE 3 : Chargeur                    - 100% COMPLÉTÉE
-✓✓✓ PHASE 4 : Outils debug                - 100% COMPLÉTÉE
-✓✓✓ PHASE MIPS : Architecture MIPS        - 100% CONFORME
-✓✓✓ PHASE 2 bis : Appels fonction (JAL/JR) - 100% COMPLÉTÉE ✓✓✓
+✓✓✓ PHASE 1 : Structure de base               - 100% COMPLÉTÉE
+✓✓✓ PHASE 2 : Machine virtuelle                - 100% COMPLÉTÉE
+✓✓✓ PHASE 3 : Chargeur                         - 100% COMPLÉTÉE
+✓✓✓ PHASE 4 : Outils debug                     - 100% COMPLÉTÉE
+✓✓✓ PHASE MIPS : Architecture MIPS             - 100% CONFORME
+✓✓✓ PHASE 2 bis : Appels fonction (JAL/JR)     - 100% COMPLÉTÉE
+✓✓✓ PHASE 5 : Compilateur LISP→ASM MIPS        - 100% COMPLÉTÉE ✓✓✓
 
-□   PHASE 5 : Compilateur LISP→ASM        - 0% NON COMMENCÉE
+RÉALISATIONS PHASE 5:
+→ ✓✓✓ Parser LISP complet (constantes, opérations, if, defun, appels)
+→ ✓✓✓ Environnement de compilation (variables, fonctions, labels)
+→ ✓✓✓ Compilation expressions arithmétiques et comparaisons
+→ ✓✓✓ Compilation if/then/else avec labels
+→ ✓✓✓ Compilation fonctions avec prologue/épilogue
+→ ✓✓✓ Compilation appels de fonction avec JAL/JR
+→ ✓✓✓ Résolution bugs CLISP (symboles $ → workaround complet)
+→ ✓✓✓ Correction formats instructions (LW, SW, ADDI)
+→ ✓✓✓ Architecture code avec JMP :MAIN
+→ ✓✓✓ TEST VALIDÉ : double(21) = 42
 
-RÉALISATIONS PHASE 2:
-→ ✓ JAL et JR implémentés et fonctionnels
-→ ✓ Fibonacci récursif testé et validé: fib(6) = 8
-→ ✓ Countdown récursif testé: 5→4→3→2→1→0
-→ ✓ Appels imbriqués avec sauvegarde $ra
-→ ✓ Conventions d'appel MIPS respectées
+TESTS RÉUSSIS:
+→ ✓ test-compiler-constant : 42 → 42
+→ ✓ test-compiler-addition : (+ 5 3) → 8
+→ ✓ test-compiler-if : (if (< 5 10) 100 200) → 100
+→ ✓✓✓ test-compiler-simple-function : (double 21) → 42
 
-PROCHAIN OBJECTIF IMMÉDIAT:
-→ Commencer Phase 5 : Compilateur LISP → ASM MIPS
-→ Parser d'expressions LISP
-→ Compilation d'expressions arithmétiques simples
-→ Compilation de fonctions
+COMPILATEUR FONCTIONNEL:
+→ ✓✓✓ Chaîne complète : LISP → ASM MIPS → Chargement → Exécution → Résultat
+→ ✓✓✓ Passage paramètres via $a0-$a3 → pile → $s0-$s7
+→ ✓✓✓ Retour valeurs via $v0
+→ ✓✓✓ Gestion pile avec prologue/épilogue
+→ ✓✓✓ Appels fonction avec JAL/JR opérationnels
 
-OBJECTIF FINAL DU PROJET:
-→ Compiler fibonacci(20) et exécuter sur la VM
-→ Résultat attendu: 6765
+================================================================================
+PHASE 6 : TESTS FIBONACCI RÉCURSIF ✓✓✓ COMPLÉTÉE - 20 novembre 2025
+================================================================================
+
+Étape 6.1 : Implémentation test de performance ✓
+-------------------------------------------------
+✓ test-fibonacci-performance créé dans compiler.lisp
+✓ fib-native : version CLISP native pour comparaison
+✓ Mesure temps avec get-internal-real-time
+✓ Variables globales : *fib-native-time*, *fib-vm-time*, etc.
+✓ Calcul ratio performance VM/natif
+✓ Affichage résultats détaillés avec instructions exécutées
+
+Étape 6.2 : Débogage récursivité ✓
+-----------------------------------
+✓ Problème initial : Résultats incorrects (fib(10) = -80 au lieu de 55)
+✓ Investigation : Trace verbose révèle registres temporaires écrasés
+✓ Diagnostic : Conflit registres $T0-$T9 dans expressions imbriquées
+✓ Diagnostic : Paramètre $S0 écrasé lors appels récursifs
+
+Étape 6.3 : Corrections apportées ✓
+------------------------------------
+✓ Correction 1 - Instructions branchement :
+  - :J, :BEQ, :BNE, :BLT, :BGT corrigés (vm.lisp)
+  - Test adresse mixte : if (>= label code-start)
+  - Évite double-addition code-start
+  - Corrige erreur "Adresse hors limites: 10015"
+
+✓ Correction 2 - compile-arithmetic :
+  - Sauvegarde résultat arg1 sur PILE au lieu de $T0
+  - Pattern : ADDI/SW → compile arg2 → LW/ADDI
+  - Évite écrasement registres temporaires
+  - Préserve résultats intermédiaires
+
+✓ Correction 3 - compile-call :
+  - Sauvegarde $S0 sur pile AVANT appel
+  - Pattern : ADDI/SW $S0 → JAL → LW/ADDI $S0
+  - Préserve paramètres fonction appelante
+  - Évite écrasement lors appels récursifs imbriqués
+
+✓ Correction 4 - Limite instructions :
+  - vm.lisp : max-instructions 100000 → 1000000
+  - Permet fib(20) avec 722k instructions
+
+Étape 6.4 : Validation progressive ✓
+-------------------------------------
+✓ fib(1) = 1 ✓ (cas base)
+✓ fib(2) = 1 ✓ (première récursion)
+✓ fib(3) = 2 ✓ (récursivité simple)
+✓ fib(5) = 5 ✓ (récursivité moyenne)
+✓ fib(10) = 55 ✓✓✓ (récursivité profonde)
+✓ fib(20) = 6765 ✓✓✓ (OBJECTIF FINAL ATTEINT)
+
+Étape 6.5 : Résultats de performance ✓
+---------------------------------------
+✓ fib(10) :
+  - Résultat : 55 ✓
+  - Temps VM : 0.081s
+  - Temps natif : 0.000045s
+  - Ratio : 1810x plus lent
+  - Instructions : 5834
+
+✓ fib(20) :
+  - Résultat : 6765 ✓✓✓
+  - Temps VM : 8.738s
+  - Temps natif : 0.005s
+  - Ratio : 1825x plus lent
+  - Instructions : 722396
+
+ANALYSE PERFORMANCE:
+→ Ratio VM/Natif constant (~1800x) = bon signe
+→ Overhead VM principalement dû à :
+  - Interprétation instructions (vs compilation native)
+  - Gestion pile explicite
+  - Sauvegarde/restauration registres
+  - Pas d'optimisation (tail-call, mémoization)
+
+DIAGNOSTICS RÉSOLUS:
+-------------------
+✓ Problème 1 : Double-addition code-start dans branchements
+  → Solution : Test (>= label code-start) dans :J, :BEQ, :BNE, :BLT, :BGT
+
+✓ Problème 2 : Registres temporaires $T0-$T9 écrasés
+  → Solution : Sauvegarde pile dans compile-arithmetic
+
+✓ Problème 3 : Paramètre $S0 écrasé lors appels récursifs
+  → Solution : Sauvegarde/restauration $S0 dans compile-call
+
+✓ Problème 4 : Limite 100k instructions insuffisante pour fib(20)
+  → Solution : Augmentation à 1M instructions
+
+CODE FIBONACCI COMPILÉ (structure):
+----------------------------------
+JMP :MAIN
+LABEL FIB
+  ADDI $SP -8 $SP       ; Allouer frame
+  SW $RA $SP 0          ; Sauvegarder $ra
+  SW $A0 $SP 4          ; Sauvegarder argument
+  LW $SP 4 $S0          ; Charger n → $s0
+  
+  ; Test if (<= n 1)
+  MOVE $S0 $V0
+  MOVE $V0 $T0
+  LI 1 $V0
+  MOVE $V0 $T1
+  SLT $T1 $T0 $T2       ; $t0 < $t1 ?
+  LI 1 $T3
+  SUB $T3 $T2 $V0       ; NOT($t0 < $t1) = ($t0 >= $t1)
+  BEQ $V0 $ZERO ELSE_0
+  
+  ; Then: retourner n
+  MOVE $S0 $V0
+  J ENDIF_1
+  
+  LABEL ELSE_0
+  ; Else: retourner (+ (fib (- n 1)) (fib (- n 2)))
+  
+  ; Calculer (fib (- n 1))
+  ADDI $SP -4 $SP       ; Sauvegarder $s0 (compile-call)
+  SW $S0 $SP 0
+  MOVE $S0 $V0          ; n → $v0
+  ADDI $SP -4 $SP       ; Sauvegarder $v0 (compile-arithmetic pour -)
+  SW $V0 $SP 0
+  LI 1 $V0              ; 1 → $v0
+  MOVE $V0 $T1
+  LW $SP 0 $T0          ; Restaurer n
+  ADDI $SP 4 $SP
+  SUB $T0 $T1 $V0       ; n-1 → $v0
+  MOVE $V0 $A0          ; n-1 → $a0
+  JAL FIB               ; Appel fib(n-1)
+  LW $SP 0 $S0          ; Restaurer $s0
+  ADDI $SP 4 $SP
+  
+  ; Sauvegarder résultat fib(n-1) sur pile (compile-arithmetic pour +)
+  ADDI $SP -4 $SP
+  SW $V0 $SP 0
+  
+  ; Calculer (fib (- n 2))
+  ADDI $SP -4 $SP       ; Sauvegarder $s0 (compile-call)
+  SW $S0 $SP 0
+  MOVE $S0 $V0          ; n → $v0
+  ADDI $SP -4 $SP       ; Sauvegarder $v0 (compile-arithmetic pour -)
+  SW $V0 $SP 0
+  LI 2 $V0              ; 2 → $v0
+  MOVE $V0 $T1
+  LW $SP 0 $T0          ; Restaurer n
+  ADDI $SP 4 $SP
+  SUB $T0 $T1 $V0       ; n-2 → $v0
+  MOVE $V0 $A0          ; n-2 → $a0
+  JAL FIB               ; Appel fib(n-2)
+  LW $SP 0 $S0          ; Restaurer $s0
+  ADDI $SP 4 $SP
+  
+  ; Additionner résultats
+  MOVE $V0 $T1          ; fib(n-2) → $t1
+  LW $SP 0 $T0          ; fib(n-1) → $t0 (depuis pile)
+  ADDI $SP 4 $SP
+  ADD $T0 $T1 $V0       ; fib(n-1) + fib(n-2) → $v0
+  
+  LABEL ENDIF_1
+  LW $SP 0 $RA          ; Restaurer $ra
+  ADDI $SP 8 $SP        ; Libérer frame
+  JR $RA                ; Retourner
+
+LABEL :MAIN
+  ADDI $SP -4 $SP       ; Sauvegarder $s0 (appel principal)
+  SW $S0 $SP 0
+  LI 20 $V0             ; 20 → $v0
+  MOVE $V0 $A0          ; 20 → $a0
+  JAL FIB               ; Appel fib(20)
+  LW $SP 0 $S0          ; Restaurer $s0
+  ADDI $SP 4 $SP
+  HALT
+
+MÉCANISME CLÉ - GESTION PILE:
+----------------------------
+1. Sauvegarde paramètres (compile-call) :
+   → Avant chaque JAL : ADDI/SW $S0
+   → Après chaque JAL : LW/ADDI $S0
+   → Préserve paramètres fonction appelante
+
+2. Sauvegarde résultats intermédiaires (compile-arithmetic) :
+   → Après compile arg1 : ADDI/SW $V0
+   → Avant utiliser arg1 : LW/ADDI → $T0
+   → Préserve résultats expressions imbriquées
+
+3. Frame fonction (compile-defun) :
+   → Prologue : ADDI $SP -8, SW $RA, SW $A0
+   → Épilogue : LW $RA, ADDI $SP +8, JR $RA
+   → Préserve adresse retour et arguments
+
+VALIDATION COMPLÈTE:
+-------------------
+✓✓✓ COMPILATEUR LISP → MIPS TOTALEMENT FONCTIONNEL
+✓✓✓ Récursivité simple validée (countdown)
+✓✓✓ Récursivité double validée (fibonacci)
+✓✓✓ Expressions imbriquées validées
+✓✓✓ Gestion pile robuste
+✓✓✓ Objectif final atteint : fib(20) = 6765
+
+================================================================================
+RÉSUMÉ ÉTAT ACTUEL (20 novembre 2025) - PROJET TERMINÉ ✓✓✓
+================================================================================
+
+✓✓✓ PHASE 1 : Structure de base               - 100% COMPLÉTÉE
+✓✓✓ PHASE 2 : Machine virtuelle                - 100% COMPLÉTÉE
+✓✓✓ PHASE 3 : Chargeur                         - 100% COMPLÉTÉE
+✓✓✓ PHASE 4 : Outils debug                     - 100% COMPLÉTÉE
+✓✓✓ PHASE MIPS : Architecture MIPS             - 100% CONFORME
+✓✓✓ PHASE 2 bis : Appels fonction (JAL/JR)     - 100% COMPLÉTÉE
+✓✓✓ PHASE 5 : Compilateur LISP→ASM MIPS        - 100% COMPLÉTÉE
+✓✓✓ PHASE 6 : Fibonacci récursif               - 100% COMPLÉTÉE ✓✓✓
+
+TOUS LES OBJECTIFS ATTEINTS:
+→ ✓✓✓ Machine virtuelle MIPS conforme 100%
+→ ✓✓✓ 38 registres MIPS implémentés
+→ ✓✓✓ 20+ instructions MIPS natives
+→ ✓✓✓ Appels fonction JAL/JR fonctionnels
+→ ✓✓✓ Compilateur LISP → MIPS complet
+→ ✓✓✓ Test simple : double(21) = 42
+→ ✓✓✓ Test complexe : fib(10) = 55
+→ ✓✓✓ OBJECTIF FINAL : fib(20) = 6765
+
+PERFORMANCE FINALE:
+→ fib(20) en 8.738s (722396 instructions)
+→ Ratio VM/Natif : 1825x (normal pour VM interprétée)
+→ Aucune erreur, résultats corrects
+→ Gestion pile robuste jusqu'à profondeur 20
+
+PROJET COMPLET ET FONCTIONNEL ✓✓✓
 
 ================================================================================

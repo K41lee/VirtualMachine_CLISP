@@ -7,14 +7,14 @@
 ;;; RÉSOLUTION DES LABELS
 ;;; ============================================================================
 
-(defun collect-labels (asm-code)
-  "Collecte tous les labels et leurs positions dans le code"
+(defun collect-labels (asm-code code-start)
+  "Collecte tous les labels et leurs positions ABSOLUES dans le code"
   (let ((labels (make-hash-table :test 'equal))
         (position 0))
     (dolist (instr asm-code)
       (if (and (listp instr) (eq (first instr) :LABEL))
-          ;; C'est un label, l'enregistrer
-          (setf (gethash (second instr) labels) position)
+          ;; C'est un label, l'enregistrer avec l'adresse absolue
+          (setf (gethash (second instr) labels) (+ code-start position))
           ;; Sinon, incrémenter la position
           (incf position)))
     labels))
@@ -53,10 +53,10 @@
     ;; Sinon erreur
     (t (error "Format de code invalide: ~A" code))))
 
-(defun preprocess-code (asm-code)
+(defun preprocess-code (asm-code code-start)
   "Prétraite le code assembleur (résolution des labels, etc.)"
   (let* ((parsed (parse-asm asm-code))
-         (labels (collect-labels parsed))
+         (labels (collect-labels parsed code-start))
          (resolved (resolve-labels parsed labels)))
     (values resolved labels)))
 
@@ -70,8 +70,9 @@
 
 (defun load-code (vm asm-code &key (verbose nil))
   "Charge le code assembleur dans la mémoire de la VM"
-  (multiple-value-bind (resolved-code labels)
-      (preprocess-code asm-code)
+  (let ((code-start (calculate-code-start vm)))
+    (multiple-value-bind (resolved-code labels)
+        (preprocess-code asm-code code-start)
     
     (when verbose
       (format t "~%=== CHARGEMENT DU CODE ===~%")
@@ -83,26 +84,25 @@
                    (format t "  ~A -> ~A~%" name addr))
                  labels)))
     
-    ;; Valider le code
-    (validate-program resolved-code)
-    
-    ;; Charger dans la mémoire
-    (let ((code-start (calculate-code-start vm))
-          (addr 0))
-      (dolist (instr resolved-code)
-        (mem-write vm (+ code-start addr) instr)
+      ;; Valider le code
+      (validate-program resolved-code)
+      
+      ;; Charger dans la mémoire
+      (let ((addr 0))
+        (dolist (instr resolved-code)
+          (mem-write vm (+ code-start addr) instr)
+          (when verbose
+            (format t "  [~A] ~A~%" addr (format-instruction instr)))
+          (incf addr))
+        
+        ;; Initialiser $pc au début du code
+        (set-register vm (get-reg :pc) code-start)
+        
         (when verbose
-          (format t "  [~A] ~A~%" addr (format-instruction instr)))
-        (incf addr))
-      
-      ;; Initialiser $pc au début du code
-      (set-register vm :$pc code-start)
-      
-      (when verbose
-        (format t "Code chargé à partir de l'adresse ~A~%" code-start)
-        (format t "$pc initialisé à ~A~%" code-start))
-      
-      (values resolved-code labels))))
+          (format t "Code chargé à partir de l'adresse ~A~%" code-start)
+          (format t "$pc initialisé à ~A~%" code-start))
+        
+        (values resolved-code labels)))))
 
 ;;; ============================================================================
 ;;; CHARGEMENT INCRÉMENTAL

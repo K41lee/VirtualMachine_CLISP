@@ -100,6 +100,33 @@
   "Liste des noms de registres MIPS")
 
 ;;; ============================================================================
+;;; HELPER pour obtenir les registres de manière sûre
+;;; ============================================================================
+
+(defun get-reg (name)
+  "Retourne le symbole de registre depuis la liste (évite problème $ dans CLISP)"
+  (case name
+    (:sp (nth 29 *register-names*))   ; :$sp
+    (:ra (nth 31 *register-names*))   ; :$ra
+    (:fp (nth 30 *register-names*))   ; :$fp
+    (:pc (nth 32 *register-names*))   ; :$pc
+    (:v0 (nth 2 *register-names*))    ; :$v0
+    (:a0 (nth 4 *register-names*))    ; :$a0
+    (:a1 (nth 5 *register-names*))    ; :$a1
+    (:a2 (nth 6 *register-names*))    ; :$a2
+    (:a3 (nth 7 *register-names*))    ; :$a3
+    (:s0 (nth 16 *register-names*))   ; :$s0
+    (:s1 (nth 17 *register-names*))   ; :$s1
+    (:s2 (nth 18 *register-names*))   ; :$s2
+    (:s3 (nth 19 *register-names*))   ; :$s3
+    (:t0 (nth 8 *register-names*))    ; :$t0
+    (:t1 (nth 9 *register-names*))    ; :$t1
+    (:t2 (nth 10 *register-names*))   ; :$t2
+    (:t3 (nth 11 *register-names*))   ; :$t3
+    (:zero (nth 0 *register-names*))  ; :$zero
+    (t (error "Registre inconnu: ~A" name))))
+
+;;; ============================================================================
 ;;; ZONES MÉMOIRE
 ;;; ============================================================================
 
