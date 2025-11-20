@@ -33,11 +33,13 @@
   "Environnement de compilation pour gérer variables et labels"
   (variables '())           ; Liste des variables locales et leurs registres/offsets pile
   (functions '())           ; Table des fonctions définies
-  (label-counter 0)         ; Compteur pour générer des labels uniques
+  (label-counter (list 0))  ; Compteur partagé (liste mutable) pour générer des labels uniques
   (temp-regs-available '()) ; Liste des registres temporaires disponibles
   (max-temp-regs 3)         ; Nombre maximum de registres temporaires ($t0, $t1, $t2)
   (stack-offset 0)          ; Offset courant pour variables sur la pile
-  (parent-env nil))         ; Environnement parent (pour portée lexicale)
+  (parent-env nil)          ; Environnement parent (pour portée lexicale)
+  (lexical-depth 0)         ; Profondeur d'imbrication lexicale (0=global, 1=level1...)
+  (parent-lexical nil))     ; Référence vers environnement parent lexical (pour closures)
 
 (defun make-new-compiler-env ()
   "Crée un nouvel environnement de compilation avec pool de registres limité"
@@ -62,8 +64,9 @@
 
 (defun gen-label (env prefix)
   "Génère un label unique avec le préfixe donné"
-  (let ((label (intern (format nil "~A_~A" prefix (compiler-env-label-counter env)))))
-    (incf (compiler-env-label-counter env))
+  (let* ((counter (compiler-env-label-counter env))
+         (label (intern (format nil "~A_~A" prefix (car counter)))))
+    (incf (car counter))  ; Modifie le contenu de la liste (partagée entre envs)
     label))
 
 (defun add-variable (env var location)
@@ -88,11 +91,15 @@
     ;; Copier les champs de base
     (setf (compiler-env-variables new-env) (copy-list (compiler-env-variables env)))
     (setf (compiler-env-functions new-env) (copy-list (compiler-env-functions env)))
+    ;; PARTAGER la référence du compteur (liste mutable) entre tous les environnements
     (setf (compiler-env-label-counter new-env) (compiler-env-label-counter env))
     (setf (compiler-env-temp-regs-available new-env) (copy-list (compiler-env-temp-regs-available env)))
     (setf (compiler-env-max-temp-regs new-env) (compiler-env-max-temp-regs env))
     (setf (compiler-env-stack-offset new-env) (compiler-env-stack-offset env))
     (setf (compiler-env-parent-env new-env) env)
+    ;; Closures Phase 9: copier profondeur lexicale
+    (setf (compiler-env-lexical-depth new-env) (compiler-env-lexical-depth env))
+    (setf (compiler-env-parent-lexical new-env) (compiler-env-parent-lexical env))
     new-env))
 
 (defun alloc-stack-slot (env)
@@ -110,6 +117,67 @@
   (let ((reg-num (mod (compiler-env-register-counter env) 10)))
     (incf (compiler-env-register-counter env))
     (intern (format nil ":$T~A" reg-num))))
+
+;;; ============================================================================
+;;; CLOSURES - PHASE 9
+;;; ============================================================================
+
+(defun make-lexical-env (parent-env &optional (increment-depth t))
+  "Crée un environnement pour nouveau scope lexical (fonction locale)"
+  (let ((new-env (make-compiler-env)))
+    ;; NE PAS copier les variables (offsets FP invalides dans nouveau scope)
+    ;; MAIS copier les fonctions (pour récursion/appels mutuels)
+    (setf (compiler-env-functions new-env) (copy-list (compiler-env-functions parent-env)))
+    (setf (compiler-env-label-counter new-env) (compiler-env-label-counter parent-env))
+    (setf (compiler-env-max-temp-regs new-env) (compiler-env-max-temp-regs parent-env))
+    (setf (compiler-env-parent-env new-env) parent-env)
+    
+    ;; Toujours définir parent-lexical (pour remontée recherche variables)
+    (setf (compiler-env-parent-lexical new-env) parent-env)
+    
+    (if increment-depth
+        ;; Mode fonction: incrémenter depth (nouveau frame)
+        (setf (compiler-env-lexical-depth new-env) 
+              (1+ (compiler-env-lexical-depth parent-env)))
+        ;; Mode block (LABELS body): même depth (pas de frame)
+        (setf (compiler-env-lexical-depth new-env) 
+              (compiler-env-lexical-depth parent-env)))
+    new-env))
+
+(defun lookup-variable-with-depth (env var)
+  "Recherche variable et retourne (location . depth) où depth = profondeur lexicale"
+  (let ((current-env env))
+    (loop
+      (unless current-env
+        ;; Plus de parent, variable non trouvée
+        (return-from lookup-variable-with-depth nil))
+      
+      ;; Chercher dans environnement courant
+      (let ((location (cdr (assoc var (compiler-env-variables current-env)))))
+        (when location
+          ;; Variable trouvée, retourner location et profondeur de CET environnement
+          (return-from lookup-variable-with-depth 
+            (cons location (compiler-env-lexical-depth current-env)))))
+      
+      ;; Remonter au parent lexical
+      (setf current-env (compiler-env-parent-lexical current-env)))))
+
+(defun generate-static-link-access (current-depth target-depth)
+  "Génère code pour suivre static links depuis current-depth vers target-depth
+   Retourne liste d'instructions ASM pour charger FP cible dans $t3"
+  (let ((depth-diff (- current-depth target-depth))
+        (code '()))
+    (if (= depth-diff 0)
+        ;; Même niveau: FP courant
+        (list (list :MOVE (get-reg :fp) *reg-t3*))
+        ;; Niveaux différents: suivre static links
+        (progn
+          ;; Charger FP courant dans $t3
+          (push (list :MOVE (get-reg :fp) *reg-t3*) code)
+          ;; Suivre static links depth-diff fois
+          (loop for i from 1 to depth-diff do
+            (push (list :LW *reg-t3* 8 *reg-t3*) code))  ; Static link à FP+8
+          (reverse code)))))
 
 ;;; ============================================================================
 ;;; PARSER LISP
@@ -207,26 +275,51 @@
 ;;; ============================================================================
 
 (defun compile-variable (var env)
-  "Compile une référence à une variable (registre ou pile)"
-  (let ((location (lookup-variable env var)))
-    (cond
-      ;; Cas 1 : Variable dans un registre
-      ((and location (symbolp location))
-       (list (list :MOVE location *reg-v0*)))
-      
-      ;; Cas 2 : Variable sur la pile (offset depuis SP)
-      ((and location (consp location) (eq (car location) :stack))
-       (let ((offset (cdr location)))
-         (list (list :LW *reg-sp* offset *reg-v0*))))
-      
-      ;; Cas 3 : Variable paramètre de fonction (offset depuis FP)
-      ((and location (consp location) (eq (car location) :fp))
-       (let ((offset (cdr location)))
-         (list (list :LW (get-reg :fp) offset *reg-v0*))))
-      
-      ;; Cas 4 : Variable non trouvée
-      (t
-       (error "Variable non définie: ~A" var)))))
+  "Compile une référence à une variable (registre, pile, ou via static links)"
+  ;; Essayer recherche avec profondeur (Phase 9 closures)
+  (let ((var-info (lookup-variable-with-depth env var)))
+    (if var-info
+        ;; Variable trouvée (possiblement dans scope englobant)
+        (let ((location (car var-info))
+              (var-depth (cdr var-info))
+              (current-depth (compiler-env-lexical-depth env)))
+          (cond
+            ;; Cas 1 : Variable dans un registre (même scope)
+            ((and (symbolp location) (= var-depth current-depth))
+             (list (list :MOVE location *reg-v0*)))
+            
+            ;; Cas 2 : Variable sur la pile (offset depuis SP, même scope)
+            ((and (consp location) (eq (car location) :stack) (= var-depth current-depth))
+             (let ((offset (cdr location)))
+               (list (list :LW *reg-sp* offset *reg-v0*))))
+            
+            ;; Cas 3 : Variable paramètre fonction (offset depuis FP, même scope)
+            ((and (consp location) (eq (car location) :fp) (= var-depth current-depth))
+             (let ((offset (cdr location)))
+               (list (list :LW (get-reg :fp) offset *reg-v0*))))
+            
+            ;; Cas 4 : Variable dans scope englobant (suivre static links)
+            ((and (consp location) (eq (car location) :fp) (< var-depth current-depth))
+             (let ((offset (cdr location)))
+               (append
+                ;; Suivre static links pour atteindre scope de la variable
+                (generate-static-link-access current-depth var-depth)
+                ;; Accéder variable avec offset depuis FP trouvé (dans $t3)
+                (list (list :LW *reg-t3* offset *reg-v0*)))))
+            
+            ;; Cas 5 : Variable dans registre à depth parente
+            ;; ATTENTION: les registres temporaires ne sont pas sauvegardés dans les frames!
+            ;; Ceci ne fonctionne que si aucun appel de fonction n'a écrasé le registre.
+            ((and (symbolp location) (< var-depth current-depth))
+             ;; Simplement copier le registre (risqué mais peut fonctionner dans des cas simples)
+             (list (list :MOVE location *reg-v0*)))
+            
+            (t
+             (error "Variable dans configuration non supportée: ~A (location: ~A, depth: ~A/~A)" 
+                    var location var-depth current-depth))))
+        
+        ;; Cas 5 : Variable non trouvée du tout
+        (error "Variable non définie: ~A" var))))
 
 ;;; ============================================================================
 ;;; COMPILATION - ARITHMÉTIQUE
@@ -496,8 +589,8 @@
 
 (defun compile-labels (definitions body env)
   "Compile (labels ((fn1 args1 body1) (fn2 args2 body2) ...) body)
-   Définit des fonctions locales avec portée lexicale"
-  (let* ((new-env (copy-env env))
+   Définit des fonctions locales avec portée lexicale et closures"
+  (let* ((new-env (make-lexical-env env nil))  ; Créer scope SANS incrémenter (LABELS body n'a pas de frame)
          (code '())
          (fn-infos '())
          (body-label (gen-label new-env "LABELS_BODY")))
@@ -522,7 +615,8 @@
              (fn-body (cddr def))
              (fn-info (cdr (assoc fn-name fn-infos)))
              (fn-label (car fn-info))
-             (fn-env (copy-env new-env))
+             ;; Créer environnement lexical pour la fonction (pas simple copy)
+             (fn-env (make-lexical-env new-env t))
              (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*)))
         
         ;; Vérifier nombre de paramètres
@@ -532,25 +626,36 @@
         ;; Label de la fonction
         (setf code (append code (list (list :LABEL fn-label))))
         
-        ;; SOLUTION ROBUSTE : Frame Pointer pour accès stable aux paramètres
-        ;; Utilisons $FP (registre 30) comme base fixe pour les paramètres
-        ;; Le registre FP est préservé et ne change pas pendant l'exécution
+        ;; PHASE 9 CLOSURES: Frame avec Static Link pour accès variables englobantes
+        ;; Frame layout: [Old FP][RA][Static Link][Params...]
+        ;; Static Link = FP du scope lexical parent (pour suivre chaîne closures)
         (if (> (length fn-args) 0)
-            ;; Cas avec paramètres : utiliser FP
+            ;; Cas avec paramètres : utiliser FP avec static link
             (let ((num-params (length fn-args)))
-              ;; 1. Sauvegarder ancien FP et RA sur la pile
-              (setf code (append code (list (list :ADDI *reg-sp* -8 *reg-sp*)
+              ;; 1. Sauvegarder ancien FP, RA et Static Link sur la pile
+              ;;    Static Link sera passé dans $a0 (premier arg temporairement)
+              (setf code (append code (list (list :ADDI *reg-sp* -12 *reg-sp*)  ; 12 bytes: FP+RA+StaticLink
                                            (list :SW (get-reg :fp) *reg-sp* 0)
-                                           (list :SW *reg-ra* *reg-sp* 4))))
+                                           (list :SW *reg-ra* *reg-sp* 4)
+                                           ;; Static link à FP+8 (sera mis à jour ci-dessous)
+                                           )))
               
               ;; 2. FP = SP actuel (début de notre frame)
               (setf code (append code (list (list :MOVE *reg-sp* (get-reg :fp)))))
               
-              ;; 3. Allouer espace pour les paramètres
+              ;; 3. Sauvegarder static link (FP parent) à FP+8
+              ;;    Pour l'instant, utiliser FP parent de l'environnement appelant
+              ;;    (sera passé correctement par compile-call)
+              (setf code (append code (list (list :SW *reg-s0* (get-reg :fp) 8))))
+              
+              ;; 4. Préparer $S0 avec notre FP (pour passer aux fonctions locales imbriquées)
+              (setf code (append code (list (list :MOVE (get-reg :fp) *reg-s0*))))
+              
+              ;; 5. Allouer espace pour les paramètres
               (let ((stack-size (* 4 num-params)))
                 (setf code (append code (list (list :ADDI *reg-sp* (- stack-size) *reg-sp*))))
                 
-                ;; 4. Sauvegarder chaque paramètre A0-A3 sur la pile
+                ;; 6. Sauvegarder chaque paramètre A0-A3 sur la pile
                 ;;    Les offsets sont calculés depuis FP
                 (loop for i from 0 below num-params
                       for arg in fn-args
@@ -560,18 +665,18 @@
                            ;; Ajouter la variable avec offset depuis FP
                            (add-variable fn-env arg (cons :fp fp-offset)))))
               
-              ;; 5. Compiler le corps de la fonction
+              ;; 7. Compiler le corps de la fonction
               (dolist (expr fn-body)
                 (setf code (append code (compile-expr expr fn-env))))
               
-              ;; 6. Restaurer SP, FP et RA avant le retour (ordre important!)
+              ;; 8. Restaurer SP, FP et RA avant le retour (ordre important!)
               ;;    D'abord restaurer SP au début du frame
               (setf code (append code (list (list :MOVE (get-reg :fp) *reg-sp*))))  ; SP = FP
               ;;    Ensuite charger RA et ancien FP depuis SP
               (setf code (append code (list (list :LW *reg-sp* 4 *reg-ra*))))  ; RA = [SP+4]
               (setf code (append code (list (list :LW *reg-sp* 0 (get-reg :fp)))))  ; FP = [SP+0]
-              ;;    Enfin libérer la pile (FP + RA = 8 bytes)
-              (setf code (append code (list (list :ADDI *reg-sp* 8 *reg-sp*)))))  ; SP += 8
+              ;;    Enfin libérer la pile (FP + RA + Static Link = 12 bytes)
+              (setf code (append code (list (list :ADDI *reg-sp* 12 *reg-sp*)))))  ; SP += 12
             
             ;; Cas sans paramètres : pas de FP nécessaire
             (dolist (expr fn-body)
@@ -637,17 +742,29 @@
 ;;; ============================================================================
 
 (defun compile-call (func-name args env)
-  "Compile un appel de fonction - sauvegarde $s0 car il contient les paramètres"
+  "Compile un appel de fonction - gère static links pour closures"
   (let ((code '())
         (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*))
         ;; Chercher fonction dans environnement local (LABELS) sinon utiliser nom global (DEFUN)
-        (target-label (or (lookup-function env func-name) func-name)))
+        (target-label (or (lookup-function env func-name) func-name))
+        (is-local-fn (lookup-function env func-name)))
     
     ;; Sauvegarder $s0 et $ra sur la pile avant l'appel
     (setf code (append code
                       (list (list :ADDI *reg-sp* -8 *reg-sp*)
                             (list :SW *reg-s0* *reg-sp* 0)
                             (list :SW *reg-ra* *reg-sp* 4))))
+    
+    ;; PHASE 9 CLOSURES: Si fonction locale, préparer static link dans $s0
+    ;; Si lexical-depth > 0, on est dans un frame de fonction → passer notre FP
+    ;; Si depth = 0, on est au niveau global ou LABELS body sans frame → garder $S0 du parent
+    (when is-local-fn
+      (if (> (compiler-env-lexical-depth env) 0)
+          ;; On est dans une fonction avec frame → passer notre FP
+          (setf code (append code
+                            (list (list :MOVE (get-reg :fp) *reg-s0*))))
+          ;; On est au niveau global ou LABELS body sans frame → garder $S0 du parent (ne rien faire)
+          ))
     
     ;; Compiler les arguments et les placer dans $a0-$a3
     (loop for arg in args

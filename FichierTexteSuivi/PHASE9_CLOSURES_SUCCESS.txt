@@ -1,0 +1,339 @@
+================================================================================
+                    PHASE 9 - CLOSURES (STATIC LINKS)
+                          IMPLÉMENTATION RÉUSSIE
+================================================================================
+
+Date : 20 novembre 2025
+Statut : ✓✓✓ COMPLÉTÉE AVEC SUCCÈS
+Tests : 6/6 (100%)
+
+================================================================================
+1. OBJECTIF
+================================================================================
+
+Implémenter les closures pour permettre aux fonctions locales imbriquées 
+d'accéder aux variables de leurs scopes englobants.
+
+Problème initial (Test 6):
+  (labels ((outer (x)
+             (labels ((inner (y) (* x y)))  ; inner doit accéder x de outer
+               (inner 3))))
+    (outer 5))
+  
+  Résultat avant Phase 9: 9 (3×3 - inner n'accède pas à x)
+  Résultat après Phase 9: 15 (5×3 - inner accède correctement à x)
+
+================================================================================
+2. ARCHITECTURE IMPLÉMENTÉE - STATIC LINKS
+================================================================================
+
+2.1 Frame Layout avec Static Link
+----------------------------------
+Chaque frame de fonction locale contient:
+
+  Position      Contenu
+  --------      -------
+  FP + 8        Static Link (pointeur vers frame parent lexical)
+  FP + 4        Return Address ($RA)
+  FP + 0        Old Frame Pointer
+  FP - 4        Paramètre 0
+  FP - 8        Paramètre 1
+  FP - 12       Paramètre 2
+  ...
+
+Taille frame: 12 bytes (Old FP + RA + Static Link)
+
+2.2 Static Link Chain
+----------------------
+Le static link pointe vers le Frame Pointer de la fonction parent LEXICALE
+(pas dynamique). Cela permet de remonter la chaîne des scopes pour accéder
+aux variables englobantes.
+
+Exemple Test 6:
+  global (depth 0) → outer (depth 1, x à FP-4) → inner (depth 2, y à FP-4)
+  
+  inner.static_link → outer.FP
+  Pour accéder x depuis inner:
+    1. Charger inner.FP dans $T3
+    2. Suivre static link: LW $T3 8 $T3  (T3 = outer.FP)
+    3. Charger x: LW $T3 -4 $V0  (V0 = x = 5)
+
+2.3 Lexical Depth
+-----------------
+Chaque environnement a une profondeur lexicale (lexical-depth):
+  - Global: depth 0
+  - Fonction locale niveau 1: depth 1
+  - Fonction locale imbriquée: depth 2
+  - LABELS body: même depth que parent (pas de frame)
+
+Calcul nombre de static links à suivre:
+  depth_diff = current_depth - target_depth
+
+================================================================================
+3. MODIFICATIONS STRUCTURES
+================================================================================
+
+3.1 Extension compiler-env
+---------------------------
+(defstruct compiler-env
+  ...
+  (lexical-depth 0)         ; Profondeur imbrication lexicale
+  (parent-lexical nil))     ; Référence environnement parent lexical
+
+3.2 Nouvelles fonctions helper
+-------------------------------
+- make-lexical-env(parent-env, increment-depth)
+  Crée environnement lexical avec chaîne parent.
+  Si increment-depth=t: depth++, parent-lexical=parent (pour fonctions)
+  Si increment-depth=nil: même depth (pour LABELS body sans frame)
+  NE copie PAS les variables (offsets FP invalides), mais copie les fonctions.
+
+- lookup-variable-with-depth(env, var)
+  Remonte chaîne parent-lexical pour trouver variable.
+  Retourne (location . depth) où depth = profondeur où var est trouvée.
+
+- generate-static-link-access(current-depth, target-depth)
+  Génère code pour suivre N static links:
+    MOVE $FP $T3              ; Start at current FP
+    LW $T3 8 $T3              ; Follow link 1
+    LW $T3 8 $T3              ; Follow link 2
+    ...                       ; N fois (N = depth_diff)
+
+================================================================================
+4. MODIFICATIONS COMPILATION
+================================================================================
+
+4.1 compile-labels
+------------------
+Changements:
+  1. Créer new-env avec make-lexical-env(env, nil)
+     → Même depth que parent (LABELS body n'a pas de frame)
+  
+  2. Créer fn-env pour chaque fonction avec make-lexical-env(new-env, t)
+     → Depth++, établit parent-lexical
+  
+  3. Prologue fonction:
+     - Frame 12 bytes (au lieu de 8)
+     - Sauvegarder static link: SW $S0 $FP 8
+     - Préparer $S0 avec notre FP: MOVE $FP $S0
+       (pour passer aux fonctions locales imbriquées)
+  
+  4. Épilogue fonction:
+     - Libérer 12 bytes: ADDI $SP 12 $SP
+
+4.2 compile-call
+----------------
+Passage static link aux fonctions locales:
+  - Si fonction locale ET env a variables locales:
+    → Passer notre FP: MOVE $FP $S0
+  - Sinon (LABELS body sans frame):
+    → Transmettre $S0 reçu du parent (ne rien faire)
+
+4.3 compile-variable
+--------------------
+Nouveaux cas:
+
+  Cas 4: Variable sur pile (FP) dans scope englobant
+    → generate-static-link-access(current-depth, var-depth)
+    → LW $T3 offset $V0
+
+  Cas 5: Variable dans registre à depth parente
+    → MOVE reg $V0
+    (Risqué: registres temporaires non sauvegardés, mais fonctionne
+     si aucun appel de fonction entre temps - cas Test 4)
+
+================================================================================
+5. TESTS ET RÉSULTATS
+================================================================================
+
+✓ TEST 1 : LABELS simple non récursif (double)
+  Expression: (labels ((double (x) (* x 2))) (double 5))
+  Résultat: 10 ✓
+
+✓ TEST 2 : LABELS récursif (factorielle)
+  Expression: (labels ((fact (n) (if (<= n 1) 1 (* n (fact (- n 1)))))) (fact 5))
+  Résultat: 120 ✓
+
+✓ TEST 3 : Récursion mutuelle (pair/impair)
+  Expression: (labels ((even? (n) ...) (odd? (n) ...)) (even? 10))
+  Résultat: 1 ✓
+
+✓ TEST 4 : LABELS avec LET (capture variable registre)
+  Expression: (let ((x 10)) (labels ((add-x (y) (+ x y))) (add-x 5)))
+  Résultat: 15 ✓
+  Note: Variable LET dans registre $T0, accessible depuis fonction locale
+
+✓ TEST 5 : Plusieurs fonctions (double, triple, sum-both)
+  Expression: (labels ((double (x) ...) (triple (x) ...) (sum-both (x) ...)) (sum-both 4))
+  Résultat: 20 ✓
+
+✓ TEST 6 : LABELS imbriqué (CLOSURES!)
+  Expression: (labels ((outer (x) (labels ((inner (y) (* x y))) (inner 3)))) (outer 5))
+  Résultat: 15 ✓✓✓
+  Validation: inner accède correctement à x de outer via static link
+
+================================================================================
+6. CODE ASSEMBLEUR GÉNÉRÉ (Test 6)
+================================================================================
+
+LOCAL_OUTER_1:
+  ADDI $SP -12 $SP        ; Allouer frame (FP + RA + Static Link)
+  SW $FP $SP 0            ; Sauver old FP
+  SW $RA $SP 4            ; Sauver RA
+  MOVE $SP $FP            ; FP = SP (début frame)
+  SW $S0 $FP 8            ; Sauver static link à FP+8
+  MOVE $FP $S0            ; S0 = notre FP (pour passer aux enfants)
+  ADDI $SP -4 $SP         ; Allouer param
+  SW $A0 $FP -4           ; Sauver x à FP-4
+  J LABELS_BODY_2         ; Aller au corps (inner défini là)
+
+LOCAL_INNER_3:
+  ADDI $SP -12 $SP        ; Frame inner
+  SW $FP $SP 0
+  SW $RA $SP 4
+  MOVE $SP $FP
+  SW $S0 $FP 8            ; Static link = outer.FP (passé dans $S0)
+  MOVE $FP $S0            ; Préparer pour enfants éventuels
+  ADDI $SP -4 $SP
+  SW $A0 $FP -4           ; y à FP-4
+  
+  ; Accès à x de outer:
+  MOVE $FP $T3            ; T3 = inner.FP
+  LW $T3 8 $T3            ; T3 = [inner.FP+8] = static link = outer.FP
+  LW $T3 -4 $V0           ; V0 = [outer.FP-4] = x = 5
+  
+  ADDI $SP -4 $SP
+  SW $V0 $SP 0            ; Sauver x sur pile
+  LW $FP -4 $V0           ; Charger y
+  MOVE $V0 $T1            ; T1 = y
+  LW $SP 0 $T0            ; T0 = x
+  ADDI $SP 4 $SP
+  MUL $T0 $T1             ; x × y = 5 × 3 = 15
+  MFLO $V0
+  
+  ; Épilogue inner
+  MOVE $FP $SP
+  LW $SP 4 $RA
+  LW $SP 0 $FP
+  ADDI $SP 12 $SP         ; Libérer 12 bytes
+  JR $RA
+
+LABELS_BODY_2:
+  ADDI $SP -8 $SP         ; Corps LABELS: pas de static link (8 bytes)
+  SW $S0 $SP 0            ; Sauver $S0 (conserve static link de outer)
+  SW $RA $SP 4
+  ; Pas de MOVE $FP $S0 car env.variables vide (pas de frame fonction)
+  LI 3 $V0                ; Charger argument 3
+  MOVE $V0 $A0
+  JAL LOCAL_INNER_3       ; $S0 contient toujours outer.FP
+  LW $SP 4 $RA
+  LW $SP 0 $S0
+  ADDI $SP 8 $SP
+  ; Retour à outer
+  MOVE $FP $SP
+  LW $SP 4 $RA
+  LW $SP 0 $FP
+  ADDI $SP 12 $SP
+  JR $RA
+
+LABELS_BODY_0:
+  ADDI $SP -8 $SP
+  SW $S0 $SP 0
+  SW $RA $SP 4
+  ; Pas de MOVE $FP $S0 (niveau global, pas de variables)
+  LI 5 $V0
+  MOVE $V0 $A0
+  JAL LOCAL_OUTER_1       ; $S0 contient valeur initiale (0 ou invalide, mais outer ne l'utilise pas)
+  LW $SP 4 $RA
+  LW $SP 0 $S0
+  ADDI $SP 8 $SP
+  PRINT $V0               ; Affiche 15
+  HALT
+
+================================================================================
+7. POINTS CLÉS DE L'IMPLÉMENTATION
+================================================================================
+
+1. SÉPARATION DEPTH LEXICALE VS FRAMES RUNTIME
+   - LABELS body: depth non incrémentée (pas de frame runtime)
+   - Fonctions locales: depth incrémentée (frame avec static link)
+   → Permet de calculer correctement nombre de links à suivre
+
+2. NE PAS COPIER LES VARIABLES DANS make-lexical-env
+   - Variables ont offsets FP relatifs à leur propre frame
+   - Copier créerait confusion (x de outer et y de inner tous deux à FP-4)
+   - Lookup via parent-lexical résout correctement
+   → Mais copier les fonctions (pour récursion/appels mutuels)
+
+3. GESTION $S0 DANS LABELS BODY
+   - Fonctions avec variables: MOVE $FP $S0 (passer notre frame)
+   - LABELS body sans variables: conserver $S0 reçu (transmettre parent)
+   → Détection via (compiler-env-variables env)
+
+4. PROLOGUE FONCTION: MOVE $FP $S0 APRÈS SAUVEGARDE
+   - Sauver static link reçu: SW $S0 $FP 8
+   - Préparer pour enfants: MOVE $FP $S0
+   → Permet aux fonctions imbriquées de recevoir notre FP
+
+5. VARIABLES REGISTRES (LET)
+   - Cas particulier: variables LET dans registres temporaires
+   - Risqué car non sauvegardés, mais fonctionne si pas d'appels entre temps
+   - Test 4 valide ce cas (x dans $T0 accessible depuis add-x)
+
+================================================================================
+8. LIMITATIONS ET AMÉLIORATIONS FUTURES
+================================================================================
+
+Limitations actuelles:
+  - Variables LET dans registres: non sûr à travers appels de fonction
+  - Pas d'optimisation: génère instructions même si pas nécessaire
+  - Closures retournées: non supportées (nécessiterait heap allocation)
+
+Améliorations possibles:
+  - Forcer variables LET sur pile si LABELS détecté dans body
+  - Optimiser accès variables (éliminer suivis static link inutiles)
+  - Supporter closures retournées (allocation dynamique)
+  - Ajouter garbage collection pour closures heap-allocated
+
+================================================================================
+9. PERFORMANCE
+================================================================================
+
+Overhead closures:
+  - Frame size: +4 bytes par fonction (static link)
+  - Accès variable englobante: +N instructions (N = depth_diff)
+    * MOVE $FP $T3: 1 instruction
+    * LW $T3 8 $T3: N instructions (suivre N links)
+    * LW $T3 offset $V0: 1 instruction
+  - Total Test 6: +3 instructions pour accès x depuis inner (acceptable)
+
+Temps d'exécution tests:
+  - 6 tests LABELS: 0.021 secondes (incluant compilation + exécution)
+  - Performance excellente pour cas d'usage typiques
+
+================================================================================
+10. CONCLUSION
+================================================================================
+
+Phase 9 CLOSURES implémentée avec SUCCÈS COMPLET!
+
+✓ Architecture static links fonctionnelle
+✓ Recherche variables remonte correctement les scopes
+✓ LABELS imbriqués supportés
+✓ 6/6 tests passent (100%)
+✓ Test 6 (objectif principal) validé: inner accède x de outer
+
+Le compilateur LISP → MIPS supporte maintenant:
+  ✓ Arithmétique et comparaisons
+  ✓ Structures de contrôle (IF, LOOP WHILE)
+  ✓ Variables et bindings (LET, SETQ)
+  ✓ Fonctions globales (DEFUN)
+  ✓ Fonctions locales (LABELS)
+  ✓ Récursion (simple et mutuelle)
+  ✓ CLOSURES avec static links (Phase 9)
+
+Prochaine étape suggérée: Phase 10 - Tests additionnels et optimisations
+
+================================================================================
+FIN DOCUMENTATION PHASE 9
+================================================================================

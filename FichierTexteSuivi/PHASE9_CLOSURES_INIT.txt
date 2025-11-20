@@ -1,0 +1,424 @@
+================================================================================
+                           PHASE 9 - CLOSURES
+                      Capture d'environnement lexical
+================================================================================
+
+Date début: 20 novembre 2025
+Statut: EN COURS - Analyse et conception
+Phase précédente: Phase 8 LABELS complétée avec succès (5/6 tests, 83%)
+
+================================================================================
+                              OBJECTIF PHASE 9
+================================================================================
+
+MISSION:
+--------
+Implémenter les CLOSURES pour permettre aux fonctions locales d'accéder aux
+variables de leurs environnements englobants.
+
+MOTIVATION:
+-----------
+Test 6 de Phase 8 échoue car fonction inner ne peut pas accéder à variable x
+de la fonction outer:
+
+Expression:
+(labels ((outer (x)
+           (labels ((inner (y)
+                      (* x y)))    ; ← inner tente d'accéder à x de outer
+             (inner 3))))
+  (outer 5))
+
+Résultat actuel: 9 (3 * 3) - x non accessible, inner multiplie y par y
+Résultat attendu: 15 (5 * 3) - x doit être capturé depuis outer
+
+CONCEPT CLOSURE:
+----------------
+Closure = Fonction + Environnement lexical capturé au moment de sa création
+
+Composants:
+1. Code de la fonction (label ASM, paramètres, corps)
+2. Environnement capturé (variables visibles à la création)
+3. Mécanisme d'accès aux variables capturées à l'exécution
+
+================================================================================
+                          ANALYSE DU PROBLÈME
+================================================================================
+
+ÉTAT ACTUEL (sans closures):
+-----------------------------
+1. compile-labels crée environnement local pour chaque fonction
+2. Environnement contient uniquement paramètres de la fonction
+3. Variables des fonctions englobantes ne sont PAS capturées
+4. Accès variable x depuis inner → ERREUR ou valeur incorrecte
+
+EXEMPLE TRACE Test 6:
+---------------------
+outer(5):
+  - Environnement outer: x = 5 (paramètre)
+  - Compile inner dans nouvel environnement (VIDE, pas de capture)
+  - inner(3):
+    * Environnement inner: y = 3
+    * Tente d'accéder x → non trouvé dans environnement inner
+    * Résultat incorrect: 9
+
+BESOIN:
+-------
+1. Capturer environnement outer lors création inner
+2. Stocker variables capturées (x = 5) avec code de inner
+3. À l'exécution de inner, accéder variables capturées
+4. Chaîne d'environnements: inner → outer → global
+
+================================================================================
+                        CONCEPTION SOLUTION
+================================================================================
+
+APPROCHE 1: Static Links (chaîne environnements statiques)
+-----------------------------------------------------------
+Principe:
+- Chaque frame de pile contient pointeur vers frame parent
+- Accès variable: remonter chaîne jusqu'à trouver variable
+- Simple mais coûteux pour fonctions profondément imbriquées
+
+Avantages:
++ Simple à implémenter
++ Pas d'allocation tas nécessaire
++ Fonctionne avec pile standard
+
+Inconvénients:
+- Performance: O(n) pour accès variable à profondeur n
+- Complique gestion frame pointer
+
+APPROCHE 2: Display (table accès direct)
+-----------------------------------------
+Principe:
+- Table globale avec pointeurs vers frames de chaque niveau
+- Accès direct à variables via index niveau + offset
+- Performance O(1) mais limité en profondeur
+
+Avantages:
++ Accès O(1) aux variables
++ Utilisé dans Pascal
+
+Inconvénients:
+- Limite profondeur imbrication
+- Complique gestion parallélisme
+
+APPROCHE 3: Closures sur tas (environnements capturés)
+-------------------------------------------------------
+Principe:
+- Allouer environnement capturé sur le tas (heap)
+- Fonction = (code, pointeur environnement capturé)
+- Environnement capturé persiste après retour fonction
+
+Avantages:
++ Flexibilité maximale
++ Support fonctions retournées comme valeurs
++ Standard langages fonctionnels (Scheme, ML)
+
+Inconvénients:
+- Nécessite allocation tas
+- Gestion mémoire plus complexe
+- Overhead allocation/déallocation
+
+CHOIX POUR VM CLISP: Static Links (Approche 1)
+-----------------------------------------------
+Justification:
+- Simplicité implémentation (pas de heap nécessaire)
+- Correspond architecture MIPS avec pile
+- Test 6 nécessite seulement 1 niveau imbrication
+- Extensible vers closures complètes si besoin futur
+
+================================================================================
+                      CONCEPTION DÉTAILLÉE - STATIC LINKS
+================================================================================
+
+STRUCTURE FRAME ÉTENDUE:
+------------------------
+Frame fonction AVANT (Phase 8):
+┌────────────┐
+│ Old FP     │  ← FP+0 (ancien frame pointer)
+├────────────┤
+│ RA         │  ← FP+4 (adresse retour)
+├────────────┤
+│ Param 0    │  ← FP-4
+├────────────┤
+│ Param 1    │  ← FP-8
+├────────────┤
+│ ...        │
+└────────────┘
+
+Frame fonction APRÈS (Phase 9 avec static link):
+┌────────────┐
+│ Old FP     │  ← FP+0 (ancien frame pointer)
+├────────────┤
+│ RA         │  ← FP+4 (adresse retour)
+├────────────┤
+│ Static Lnk │  ← FP+8 (pointeur vers frame parent lexical) ★ NOUVEAU
+├────────────┤
+│ Param 0    │  ← FP-4
+├────────────┤
+│ Param 1    │  ← FP-8
+├────────────┤
+│ ...        │
+└────────────┘
+
+Static Link = FP de la fonction englobante lexicalement (pas dynamiquement)
+
+EXEMPLE Test 6:
+---------------
+outer(5) appelé:
+┌────────────┐
+│ Old FP     │  ← Outer FP+0
+├────────────┤
+│ RA         │  ← Outer FP+4
+├────────────┤
+│ Stat Link  │  ← Outer FP+8 = NULL (fonction top-level)
+├────────────┤
+│ x = 5      │  ← Outer FP-4 (paramètre outer)
+└────────────┘
+
+inner(3) appelé depuis outer:
+┌────────────┐
+│ Old FP     │  ← Inner FP+0
+├────────────┤
+│ RA         │  ← Inner FP+4
+├────────────┤
+│ Stat Link  │  ← Inner FP+8 = Outer FP ★ POINTE VERS OUTER
+├────────────┤
+│ y = 3      │  ← Inner FP-4 (paramètre inner)
+└────────────┘
+
+Accès variable x depuis inner:
+1. Chercher x dans frame inner (FP-4, FP-8...) → non trouvé
+2. Suivre static link: FP+8 → Outer FP
+3. Chercher x dans frame outer: Outer FP-4 → trouvé x = 5 ✓
+4. Résultat: y * x = 3 * 5 = 15 ✓
+
+================================================================================
+                      MODIFICATIONS NÉCESSAIRES
+================================================================================
+
+1. COMPILER-ENV - Ajouter champ profondeur lexicale:
+-----------------------------------------------------
+(defstruct compiler-env
+  ...
+  (lexical-depth 0)        ; Profondeur imbrication (0=global, 1=level1...)
+  (parent-lexical nil))    ; Référence vers environnement parent lexical
+
+2. COMPILE-LABELS - Passer static link:
+----------------------------------------
+Lors compilation fonction inner:
+- Stocker profondeur lexicale de inner (outer.depth + 1)
+- Générer code pour sauvegarder FP de outer comme static link
+- Lors appel inner: charger static link depuis frame outer
+
+3. COMPILE-VARIABLE - Remonter static links:
+---------------------------------------------
+Lors recherche variable:
+- Chercher dans environnement courant
+- Si trouvé: utiliser offset depuis FP courant
+- Sinon: déterminer profondeur variable (via parent-env)
+- Générer code: suivre N static links puis accéder variable
+
+4. COMPILE-CALL (fonctions locales) - Passer static link:
+----------------------------------------------------------
+Avant appel fonction locale:
+- Calculer différence profondeur (fonction appelée vs fonction courante)
+- Si même niveau: passer FP courant comme static link
+- Si niveau supérieur: remonter static links appropriés
+
+================================================================================
+                          PLAN D'IMPLÉMENTATION
+================================================================================
+
+ÉTAPE 1: Étendre compiler-env (PRIORITÉ IMMÉDIATE)
+---------------------------------------------------
+□ Ajouter champs lexical-depth et parent-lexical
+□ Modifier make-new-compiler-env: depth = 0
+□ Modifier copy-env: incrémenter depth si création scope lexical
+□ Tester: créer environnements imbriqués, vérifier depth
+
+ÉTAPE 2: Modifier compile-labels (CORE)
+----------------------------------------
+□ Calculer depth pour chaque fonction locale
+□ Générer prologue avec sauvegarde static link
+□ Modifier frame layout: Old FP, RA, Static Link, params
+□ Ajuster offsets paramètres (décalage +4 pour static link)
+□ Tester: génération code assembleur correct
+
+ÉTAPE 3: Modifier compile-variable (ACCÈS)
+-------------------------------------------
+□ Implémenter lookup-variable-with-depth
+□ Remonter parent-env pour déterminer profondeur variable
+□ Générer code: suivre static links (LW static link N fois)
+□ Accéder variable avec offset depuis FP trouvé
+□ Tester: accès variables à différentes profondeurs
+
+ÉTAPE 4: Modifier compile-call (APPELS)
+----------------------------------------
+□ Différencier appels fonctions locales vs globales
+□ Pour locales: calculer et passer static link approprié
+□ Cas même niveau: passer FP courant
+□ Cas niveau inférieur: suivre static links
+□ Tester: appels entre fonctions différents niveaux
+
+ÉTAPE 5: Tests et validation
+-----------------------------
+□ Test simple: une fonction accède variable englobante
+□ Test 6 Phase 8: inner accède x de outer
+□ Test complexe: 3 niveaux imbrication
+□ Test récursion avec closures
+□ Valider tous tests Phase 8 toujours passent
+
+================================================================================
+                              TESTS PRÉVUS
+================================================================================
+
+TEST 1: Closure simple (baseline)
+----------------------------------
+(labels ((outer (x)
+           (labels ((inner (y)
+                      (+ x y)))
+             (inner 10))))
+  (outer 5))
+
+Attendu: 15
+Description: inner accède x de outer (1 niveau)
+
+TEST 2: Test 6 Phase 8 (objectif principal)
+--------------------------------------------
+(labels ((outer (x)
+           (labels ((inner (y)
+                      (* x y)))
+             (inner 3))))
+  (outer 5))
+
+Attendu: 15
+Description: Validation correction bug Test 6
+
+TEST 3: Closure avec plusieurs variables
+-----------------------------------------
+(labels ((outer (a b)
+           (labels ((inner (c)
+                      (+ a (+ b c))))
+             (inner 10))))
+  (outer 3 5))
+
+Attendu: 18 (3 + 5 + 10)
+Description: Capture plusieurs variables englobantes
+
+TEST 4: 3 niveaux imbrication
+------------------------------
+(labels ((level1 (x)
+           (labels ((level2 (y)
+                      (labels ((level3 (z)
+                                 (+ x (+ y z))))
+                        (level3 5))))
+             (level2 3))))
+  (level1 1))
+
+Attendu: 9 (1 + 3 + 5)
+Description: Static links à travers 3 niveaux
+
+TEST 5: Récursion avec closure
+-------------------------------
+(labels ((make-counter (n)
+           (labels ((count (i)
+                      (if (= i 0)
+                          n
+                          (count (- i 1)))))
+             (count 3))))
+  (make-counter 42))
+
+Attendu: 42
+Description: Fonction récursive accède variable englobante
+
+================================================================================
+                          RESSOURCES ET RÉFÉRENCES
+================================================================================
+
+Documentation:
+- PHASE8_SUCCES_MAJEUR.txt: Implémentation LABELS actuelle
+- BUG_LABELS_RESOLU.txt: Solution compteur partagé
+
+Code à modifier:
+- compiler.lisp: compile-labels, compile-variable, compile-call
+- Structures: compiler-env (ajouter lexical-depth)
+
+Tests existants:
+- test-labels.lisp: Test 6 à valider après implémentation
+
+Concepts:
+- Static links: Chaîne environnements lexicaux via pile
+- Frame pointer: Base calcul offsets paramètres
+- Lexical scoping: Portée déterminée statiquement (vs dynamique)
+
+================================================================================
+                              NOTES TECHNIQUES
+================================================================================
+
+REGISTRES UTILISÉS:
+-------------------
+- $FP (reg 30): Frame pointer courant
+- $SP (reg 29): Stack pointer
+- $RA (reg 31): Return address
+- $T0-$T2: Temporaires pour suivre static links
+
+CONVENTION OFFSETS FRAME (après Phase 9):
+------------------------------------------
+FP+8:  Static link (nouveau)
+FP+4:  RA
+FP+0:  Old FP
+FP-4:  Param 0
+FP-8:  Param 1
+FP-12: Param 2
+...
+
+ALGORITHME ACCÈS VARIABLE (pseudocode):
+----------------------------------------
+function access-variable(var-name, current-fp, target-depth):
+  depth-diff = current-depth - target-depth
+  temp-fp = current-fp
+  
+  for i = 0 to depth-diff - 1:
+    temp-fp = [temp-fp + 8]  # Suivre static link
+  
+  return [temp-fp + var-offset]  # Accéder variable
+
+GESTION ERREURS:
+----------------
+- Variable non trouvée: parcourir tous niveaux avant erreur
+- Static link NULL: stop recherche (niveau global atteint)
+- Profondeur excessive: warning performance (> 5 niveaux)
+
+================================================================================
+                              PROCHAINES ÉTAPES
+================================================================================
+
+IMMÉDIAT:
+---------
+1. Modifier defstruct compiler-env (ajouter lexical-depth, parent-lexical)
+2. Créer fonction helper: calculate-lexical-depth
+3. Créer fonction helper: generate-static-link-access
+
+COURT TERME:
+------------
+1. Implémenter nouveau prologue compile-labels avec static link
+2. Modifier compile-variable pour suivre static links
+3. Tester avec Test 1 (closure simple)
+
+MOYEN TERME:
+------------
+1. Valider Test 6 Phase 8
+2. Créer suite complète tests closures
+3. Optimiser: cache static links si plusieurs accès
+
+LONG TERME (optionnel):
+-----------------------
+1. Migration vers vraies closures sur tas (retourner fonctions)
+2. Garbage collection environnements capturés
+3. Optimisations: lambda lifting, closure conversion
+
+================================================================================
+FIN DOCUMENT - Phase 9 CLOSURES - Analyse et conception
+================================================================================
