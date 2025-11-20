@@ -1,0 +1,389 @@
+================================================================================
+                    INDEX DE LA DOCUMENTATION
+            Guide de Lecture des Documents du Projet
+================================================================================
+
+Date de création : 20 novembre 2025
+Dernière mise à jour : 20 novembre 2025
+
+Ce fichier guide votre lecture de la documentation consolidée du projet.
+
+================================================================================
+                    STRUCTURE DE LA DOCUMENTATION
+================================================================================
+
+La documentation a été organisée en 4 fichiers principaux :
+
+1. GUIDE_PROJET.txt
+2. DOCUMENTATION_TECHNIQUE.txt
+3. HISTORIQUE_DEVELOPPEMENT.txt
+4. RAPPORT_FINAL.txt
+
+Chaque fichier a un objectif spécifique et peut être lu indépendamment.
+
+================================================================================
+                    1. GUIDE_PROJET.txt
+================================================================================
+
+📋 TYPE : Guide de référence + Suivi progression
+📄 PAGES : ~500 lignes
+⏱️  LECTURE : 20-30 minutes
+
+CONTENU :
+---------
+Section 1 : Objectifs du projet
+  - Objectif global
+  - Fonctionnalités supportées
+  - Architecture mémoire
+  - Objectif de test (fibonacci 20)
+
+Section 2 : Plan d'action (11 phases)
+  - Phase 1 : Structure base
+  - Phase 2 : Machine virtuelle
+  - Phase 3 : Chargeur
+  - Phase 4 : Outils debug
+  - Phase MIPS : Architecture MIPS
+  - Phase 2bis : Appels fonction JAL/JR
+  - Phase 5 : Compilateur LISP → MIPS
+  - Phase 6 : Fibonacci récursif
+  - Amélioration : Gestion registres
+  - Modularisation : Séparation tests
+
+Section 3 : État actuel
+  - Résumé global (100% complété)
+  - Conformité MIPS
+  - Fichiers du projet
+  - Tests validés
+
+Section 4 : Utilisation
+  - Chargement système
+  - Exemples utilisation
+  - Fonctions principales
+
+Section 5 : Prochaines étapes (optionnelles)
+  - Améliorations possibles
+  - Extensions futures
+
+QUAND LIRE :
+------------
+✓ Pour comprendre le projet dans son ensemble
+✓ Pour voir l'état d'avancement détaillé
+✓ Pour connaître l'utilisation du système
+✓ En premier si vous découvrez le projet
+
+================================================================================
+                    2. DOCUMENTATION_TECHNIQUE.txt
+================================================================================
+
+📋 TYPE : Référence technique MIPS
+📄 PAGES : ~800 lignes
+⏱️  LECTURE : 40-60 minutes (référence à consulter)
+
+CONTENU :
+---------
+Section 1 : Architecture MIPS
+  1.1 Registres MIPS (38 registres)
+  1.2 Initialisation registres
+  1.3 Disposition mémoire
+  1.4 Conventions d'appel MIPS
+
+Section 2 : Instructions MIPS
+  2.1 Arithmétiques (ADD, SUB, MUL, DIV, ADDI, etc.)
+  2.2 Transfert (LI, MOVE)
+  2.3 Mémoire (LW, SW)
+  2.4 Branchement (J, JAL, JR, BEQ, BNE, BLT, BGT)
+  2.5 Comparaison (SLT)
+  2.6 Contrôle (NOP, HALT, PRINT, LABEL)
+  2.7 Pile (PUSH, POP)
+
+Section 3 : Exemples complets
+  3.1 Arithmétique : (10+5)*2 = 30
+  3.2 Branchement : if 5<10 then 100 else 200
+  3.3 Fonction simple : double(21) = 42
+  3.4 Fibonacci récursif : fib(10) = 55
+
+Section 4 : Conformité MIPS
+  4.1 Score conformité (100%)
+  4.2 Extensions non-standard
+  4.3 Différences avec MIPS matériel
+  4.4 Tests validation
+
+Section 5 : Utilisation
+  5.1 Écrire programme MIPS
+  5.2 Charger et exécuter
+  5.3 Déboguer
+
+QUAND LIRE :
+------------
+✓ Pour écrire du code assembleur MIPS
+✓ Pour comprendre les instructions disponibles
+✓ Pour consulter la syntaxe exacte
+✓ En référence lors du développement
+✓ Ne pas lire en entier, utiliser comme référence
+
+================================================================================
+                    3. HISTORIQUE_DEVELOPPEMENT.txt
+================================================================================
+
+📋 TYPE : Chronologie développement
+📄 PAGES : ~600 lignes
+⏱️  LECTURE : 30-40 minutes
+
+CONTENU :
+---------
+Phase 2 : Appels fonction MIPS
+  - Priorité 1 : Instructions JAL/JR
+  - Priorité 2 : Gestion frames
+  - Priorité 3 : Conventions d'appel
+  - Exemples créés
+  - Tests ajoutés
+
+Phase 3 : Compilateur LISP → MIPS (initiation)
+  - Structure créée
+  - Parser LISP
+  - Environnement compilation
+  - Compilation expressions
+
+Phase 5 : Finalisation compilateur
+  - Corrections majeures (6 bugs)
+  - Compilation fonctions (defun)
+  - Compilation appels
+  - Test validant : double(21) = 42
+  - Résolution bugs
+
+Phase 6 : Fibonacci récursif
+  - Implémentation test performance
+  - Débogage initial
+  - Corrections appliquées (4 corrections)
+  - Validation progressive (fib 1→20)
+  - Résultats performance
+
+Amélioration : Gestion dynamique registres
+  - Objectif et motivation
+  - Implémentation (pool 3 registres)
+  - Stratégie 3 niveaux
+  - Exemple code généré
+  - Tests validation
+  - Avantages
+
+Modularisation : Séparation tests
+  - Objectif
+  - Changements effectués
+  - Structure finale
+  - Avantages
+  - Validation
+
+Chronologie résumée
+  - Timeline complète
+
+Leçons apprises
+  - Architecture MIPS
+  - Compilation
+  - Débogage
+  - Gestion registres
+  - Modularisation
+  - Performance
+
+QUAND LIRE :
+------------
+✓ Pour comprendre l'évolution du projet
+✓ Pour voir les défis rencontrés et solutions
+✓ Pour apprendre des erreurs et corrections
+✓ En second, après GUIDE_PROJET.txt
+✓ Utile pour formation/apprentissage
+
+================================================================================
+                    4. RAPPORT_FINAL.txt
+================================================================================
+
+📋 TYPE : Rapport final consolidé
+📄 PAGES : ~700 lignes
+⏱️  LECTURE : 35-45 minutes
+
+CONTENU :
+---------
+Section 1 : Résumé exécutif
+  - Objectif projet
+  - Réalisations majeures
+  - Conformité MIPS
+  - Système opérationnel
+
+Section 2 : Résultats fibonacci(20)
+  2.1 Test principal
+  2.2 Résultats progressifs (tableau fib 1-20)
+  2.3 Tests validés (16/16)
+
+Section 3 : Architecture système
+  3.1 Machine virtuelle MIPS
+  3.2 Chargeur code
+  3.3 Compilateur LISP → MIPS
+
+Section 4 : Composants système
+  4.1 Fichiers source (10 fichiers)
+  4.2 Documentation (4 fichiers)
+  4.3 Outils et fonctionnalités
+
+Section 5 : Défis et solutions
+  5.1 Symboles $ dans CLISP
+  5.2 Récursivité double (fibonacci)
+  5.3 Résolution labels
+  5.4 Gestion registres limitée
+  5.5 Modularité code
+
+Section 6 : Analyse performance
+  6.1 Métriques fibonacci(20)
+  6.2 Sources overhead VM
+  6.3 Ratio acceptable
+
+Section 7 : Améliorations possibles
+  7.1 Optimisations compilateur
+  7.2 Optimisations VM
+  7.3 Extensions langage
+  7.4 Fonctionnalités avancées
+
+Section 8 : Conclusions
+  8.1 Objectifs atteints
+  8.2 Qualité code
+  8.3 Apprentissages
+  8.4 Appréciation globale
+
+QUAND LIRE :
+------------
+✓ Pour présentation du projet
+✓ Pour rapport académique
+✓ Pour évaluation complète
+✓ En dernier, pour synthèse globale
+✓ Document officiel du projet
+
+================================================================================
+                    GUIDE DE LECTURE SUGGÉRÉ
+================================================================================
+
+DÉCOUVERTE RAPIDE (30 minutes) :
+---------------------------------
+1. GUIDE_PROJET.txt - Section 1 (Objectifs)
+2. GUIDE_PROJET.txt - Section 3 (État actuel)
+3. RAPPORT_FINAL.txt - Section 1 (Résumé exécutif)
+4. RAPPORT_FINAL.txt - Section 2 (Résultats fibonacci)
+
+COMPRÉHENSION COMPLÈTE (2-3 heures) :
+--------------------------------------
+1. GUIDE_PROJET.txt - Lecture complète
+2. HISTORIQUE_DEVELOPPEMENT.txt - Lecture complète
+3. RAPPORT_FINAL.txt - Lecture complète
+4. DOCUMENTATION_TECHNIQUE.txt - Parcours sections 1 et 2
+
+DÉVELOPPEMENT/EXTENSION (référence continue) :
+-----------------------------------------------
+1. DOCUMENTATION_TECHNIQUE.txt - Consultation régulière
+2. GUIDE_PROJET.txt - Section 5 (Prochaines étapes)
+3. RAPPORT_FINAL.txt - Section 7 (Améliorations possibles)
+
+PRÉSENTATION/DÉMONSTRATION :
+-----------------------------
+1. RAPPORT_FINAL.txt - Sections 1, 2, 8
+2. Démo live avec fibonacci(20)
+3. GUIDE_PROJET.txt - Section 4 (Utilisation)
+
+================================================================================
+                    CORRESPONDANCE ANCIENS FICHIERS
+================================================================================
+
+Les anciens fichiers ont été regroupés comme suit :
+
+GUIDE_PROJET.txt remplace :
+  - Progression.txt (suivi progression)
+  - PlanAction_DetailE.txt (plan 11 phases)
+
+DOCUMENTATION_TECHNIQUE.txt remplace :
+  - Documentation_Instructions.txt (instructions MIPS)
+  - Reference_MIPS.txt (référence architecture)
+  - Verification_Conformite_MIPS.txt (conformité)
+
+HISTORIQUE_DEVELOPPEMENT.txt remplace :
+  - Phase2_Recapitulatif.txt (appels fonction)
+  - Phase3_Recapitulatif_Compiler.txt (compilateur)
+  - Resume_Final_Phase5.txt (finalisation)
+  - Amelioration_Registres.txt (registres)
+  - Separation_Tests_Compilateur.txt (tests)
+
+RAPPORT_FINAL.txt remplace :
+  - Rapport_Final_Projet.txt (rapport)
+  - Etat_Final_Projet.txt (état final)
+  - Resultats_Finaux.txt (résultats)
+  - Recapitulatif_MIPS.txt (récap MIPS)
+
+AVANTAGES CONSOLIDATION :
+-------------------------
+✓ 14 fichiers → 4 fichiers (-71% fichiers)
+✓ Pas de perte d'information
+✓ Organisation plus claire
+✓ Navigation simplifiée
+✓ Moins de redondance
+✓ Lecture plus fluide
+
+================================================================================
+                    QUESTIONS FRÉQUENTES
+================================================================================
+
+Q : Quel fichier lire en premier ?
+A : GUIDE_PROJET.txt pour vue d'ensemble
+
+Q : Comment trouver syntaxe instruction MIPS ?
+A : DOCUMENTATION_TECHNIQUE.txt - Section 2
+
+Q : Comment le projet a-t-il été développé ?
+A : HISTORIQUE_DEVELOPPEMENT.txt - Chronologie complète
+
+Q : Quels sont les résultats finaux ?
+A : RAPPORT_FINAL.txt - Section 2
+
+Q : Comment utiliser le système ?
+A : GUIDE_PROJET.txt - Section 4 + README.md
+
+Q : Le projet est-il complet ?
+A : Oui, 100% complété - RAPPORT_FINAL.txt - Section 8
+
+Q : Peut-on étendre le système ?
+A : Oui - RAPPORT_FINAL.txt - Section 7 (améliorations)
+
+Q : Documentation technique architecture MIPS ?
+A : DOCUMENTATION_TECHNIQUE.txt - Sections 1-4
+
+================================================================================
+                    MAINTENANCE DE LA DOCUMENTATION
+================================================================================
+
+MISES À JOUR FUTURES :
+----------------------
+Si le projet évolue, mettre à jour :
+1. GUIDE_PROJET.txt - Section 3 (état actuel)
+2. HISTORIQUE_DEVELOPPEMENT.txt - Ajouter nouvelle phase
+3. RAPPORT_FINAL.txt - Si changements majeurs
+4. DOCUMENTATION_TECHNIQUE.txt - Si nouvelles instructions
+
+STRUCTURE STABLE :
+------------------
+La structure actuelle 4 fichiers est DÉFINITIVE.
+Ne pas créer de nouveaux fichiers, utiliser sections existantes.
+
+COHÉRENCE :
+-----------
+Maintenir cohérence entre :
+- GUIDE_PROJET.txt (plan + état)
+- HISTORIQUE_DEVELOPPEMENT.txt (chronologie)
+- RAPPORT_FINAL.txt (synthèse officielle)
+
+================================================================================
+                    DOCUMENTATION ORGANISÉE ET CLAIRE ✓✓✓
+================================================================================
+
+La documentation est maintenant :
+✓ Consolidée (4 fichiers au lieu de 14)
+✓ Organisée par fonction
+✓ Complète et détaillée
+✓ Facile à naviguer
+✓ Sans redondance
+✓ Prête à l'utilisation
+
+================================================================================

@@ -2,6 +2,7 @@
 ;;;; Point d'entrée principal du projet
 
 (load "tests.lisp")
+(load "test-compiler.lisp")
 
 ;;; ============================================================================
 ;;; FONCTION PRINCIPALE

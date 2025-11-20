@@ -16,24 +16,37 @@ Développer un système permettant de :
 
 ```
 VirtualMachine_CLISP/
-├── README.md                    # Ce fichier
-├── main.lisp                    # Point d'entrée principal
+├── README.md                    # Ce fichier - Documentation complète
+│
+├── main.lisp                    # Point d'entrée principal du projet
+│
 ├── asm-ops.lisp                 # Définitions opcodes et registres MIPS
-├── vm.lisp                      # Machine virtuelle MIPS
+├── vm.lisp                      # Machine virtuelle MIPS (exécution)
 ├── loader.lisp                  # Chargeur de code avec résolution labels
-├── compiler.lisp                # Compilateur LISP → MIPS
+│
+├── compiler.lisp                # Compilateur LISP → MIPS (noyau)
+├── test-compiler.lisp           # Tests du compilateur (séparé)
+│
+├── tests.lisp                   # Suite de tests de la VM
 ├── utils.lisp                   # Outils de debug et visualisation
-├── tests.lisp                   # Suite de tests
+│
 ├── examples-mips.lisp           # Exemples de code MIPS
 ├── examples.lisp                # Exemples ancien format
-└── FichierTexteSuivi/           # Documentation détaillée
-    ├── Progression.txt          # Suivi développement
-    ├── PlanAction_DetailE.txt   # Plan 11 phases
-    ├── Rapport_Final_Projet.txt # Rapport complet
-    ├── Resultats_Finaux.txt     # Résultats synthétiques
-    ├── Amelioration_Registres.txt # Gestion dynamique registres
-    └── [autres docs...]
+│
+└── FichierTexteSuivi/           # Documentation consolidée
+    ├── GUIDE_PROJET.txt         # Plan + Progression complète
+    ├── DOCUMENTATION_TECHNIQUE.txt # Référence MIPS complète
+    ├── HISTORIQUE_DEVELOPPEMENT.txt # Chronologie développement
+    └── RAPPORT_FINAL.txt        # Rapport final consolidé
 ```
+
+### Organisation Modulaire
+
+**Fichiers Principaux :**
+- `compiler.lisp` : Contient uniquement la logique de compilation
+- `test-compiler.lisp` : Contient tous les tests du compilateur
+- `tests.lisp` : Tests de la machine virtuelle
+- `main.lisp` : Charge l'ensemble du système
 
 ## 🚀 Installation et Lancement
 
@@ -50,6 +63,9 @@ clisp main.lisp
 
 # Ou charger uniquement le compilateur
 clisp -x "(load \"compiler.lisp\")"
+
+# Charger le compilateur avec les tests
+clisp -x "(load \"test-compiler.lisp\")"
 ```
 
 ## 💻 Utilisation
@@ -126,19 +142,20 @@ Ratio (VM / Natif): 2692.45x plus lent
 ### 4. Exécuter les Tests
 
 ```lisp
-;; Charger et exécuter tous les tests
+;; Tests de la VM
 (load "tests.lisp")
-
-;; Tests VM
 (test-vm-basic)
 (test-stack-operations)
 (test-jal-jr)
 
-;; Tests compilateur
+;; Tests du compilateur
+(load "test-compiler.lisp")
 (test-compiler-constant)
 (test-compiler-addition)
 (test-compiler-if)
 (test-compiler-simple-function)
+(test-fibonacci-performance 10)
+(run-all-compiler-tests)
 ```
 
 ## 🏗️ Architecture
@@ -471,15 +488,41 @@ Le compilateur utilise un **pool limité de 3 registres** ($t0, $t1, $t2) avec a
 
 ## 📚 Documentation Complète
 
-Consultez les fichiers dans `FichierTexteSuivi/` pour :
+Documentation organisée et consolidée dans `FichierTexteSuivi/` :
 
-- **Progression.txt** : Suivi détaillé du développement
-- **PlanAction_DetailE.txt** : Plan d'action 11 phases
-- **Rapport_Final_Projet.txt** : Rapport technique complet
-- **Resultats_Finaux.txt** : Synthèse des résultats
-- **Amelioration_Registres.txt** : Gestion dynamique registres
-- **Documentation_Instructions.txt** : Documentation MIPS
-- **Reference_MIPS.txt** : Référence architecture
+### **GUIDE_PROJET.txt** (Plan + Progression)
+Contient le plan d'action complet (11 phases) et le suivi de progression détaillé.
+- Objectifs du projet
+- Plan d'action phase par phase
+- État actuel de chaque phase
+- Utilisation du système
+- Prochaines étapes
+
+### **DOCUMENTATION_TECHNIQUE.txt** (Référence MIPS)
+Documentation technique complète de l'architecture MIPS.
+- 38 registres MIPS détaillés
+- 20+ instructions avec syntaxe et exemples
+- Conventions d'appel MIPS
+- Exemples complets (fibonacci, factorial, etc.)
+- Score conformité MIPS 100%
+
+### **HISTORIQUE_DEVELOPPEMENT.txt** (Chronologie)
+Historique chronologique du développement.
+- Phase 2 : Appels fonction JAL/JR
+- Phase 3/5 : Compilateur LISP → MIPS
+- Phase 6 : Fibonacci récursif
+- Amélioration : Gestion dynamique registres
+- Modularisation : Séparation tests
+- Leçons apprises
+
+### **RAPPORT_FINAL.txt** (Rapport consolidé)
+Rapport final complet du projet.
+- Résumé exécutif
+- Résultats fibonacci(20)
+- Architecture système
+- Défis et solutions
+- Analyse performance
+- Conclusions
 
 ## 🏆 Résultats Finaux
 
