@@ -31,14 +31,32 @@
 
 (defstruct compiler-env
   "Environnement de compilation pour gérer variables et labels"
-  (variables '())           ; Liste des variables locales et leurs registres
+  (variables '())           ; Liste des variables locales et leurs registres/offsets pile
   (functions '())           ; Table des fonctions définies
   (label-counter 0)         ; Compteur pour générer des labels uniques
-  (register-counter 0))     ; Compteur pour allouer des registres temporaires
+  (temp-regs-available '()) ; Liste des registres temporaires disponibles
+  (max-temp-regs 3))        ; Nombre maximum de registres temporaires ($t0, $t1, $t2)
 
 (defun make-new-compiler-env ()
-  "Crée un nouvel environnement de compilation"
-  (make-compiler-env))
+  "Crée un nouvel environnement de compilation avec pool de registres limité"
+  (let ((env (make-compiler-env)))
+    ;; Initialiser le pool de registres temporaires (seulement $t0, $t1, $t2)
+    (setf (compiler-env-temp-regs-available env) 
+          (list *reg-t0* *reg-t1* *reg-t2*))
+    env))
+
+(defun allocate-temp-reg (env)
+  "Alloue un registre temporaire depuis le pool. Retourne NIL si plus disponible."
+  (let ((regs (compiler-env-temp-regs-available env)))
+    (when regs
+      (let ((reg (first regs)))
+        (setf (compiler-env-temp-regs-available env) (rest regs))
+        reg))))
+
+(defun free-temp-reg (env reg)
+  "Libère un registre temporaire et le remet dans le pool"
+  (when reg
+    (push reg (compiler-env-temp-regs-available env))))
 
 (defun gen-label (env prefix)
   "Génère un label unique avec le préfixe donné"
@@ -46,9 +64,9 @@
     (incf (compiler-env-label-counter env))
     label))
 
-(defun add-variable (env var register)
-  "Ajoute une variable à l'environnement"
-  (push (cons var register) (compiler-env-variables env)))
+(defun add-variable (env var location)
+  "Ajoute une variable à l'environnement (location = registre ou offset pile)"
+  (push (cons var location) (compiler-env-variables env)))
 
 (defun lookup-variable (env var)
   "Recherche une variable dans l'environnement"
@@ -144,36 +162,82 @@
 ;;; ============================================================================
 
 (defun compile-arithmetic (op args env)
-  "Compile une opération arithmétique - sauvegarde arg1 sur la pile"
+  "Compile une opération arithmétique - utilise registres si disponibles, sinon pile"
   (cond
     ;; Opération binaire: (+ a b)
     ((= (length args) 2)
      (let* ((arg1 (first args))
             (arg2 (second args))
             (code1 (compile-expr arg1 env))
-            (reg1 *reg-t0*)
-            (code2 (compile-expr arg2 env))
-            (reg2 *reg-t1*))
-       (append
-        code1
-        ;; Sauvegarder résultat 1 sur la pile au lieu d'un registre
-        (list (list :ADDI *reg-sp* -4 *reg-sp*)
-              (list :SW *reg-v0* *reg-sp* 0))
-        code2
-        (list (list :MOVE *reg-v0* reg2))  ; Résultat 2 dans $t1
-        ;; Restaurer résultat 1 depuis la pile
-        (list (list :LW *reg-sp* 0 reg1)
-              (list :ADDI *reg-sp* 4 *reg-sp*))
-        (case op
-          (+ (list (list :ADD reg1 reg2 *reg-v0*)))
-          (- (list (list :SUB reg1 reg2 *reg-v0*)))
-          (* (list (list :MUL reg1 reg2)
-                   (list :MFLO *reg-v0*)))
-          (/ (list (list :DIV reg1 reg2)
-                   (list :MFLO *reg-v0*)))
-          (mod (list (list :DIV reg1 reg2)
-                     (list :MFHI *reg-v0*)))
-          (t (error "Opérateur arithmétique non supporté: ~A" op))))))
+            ;; Essayer d'allouer deux registres temporaires
+            (reg1 (allocate-temp-reg env))
+            (reg2 (allocate-temp-reg env)))
+       
+       (cond
+         ;; Cas 1: Deux registres disponibles - optimal
+         ((and reg1 reg2)
+          (prog1
+              (append
+               code1
+               (list (list :MOVE *reg-v0* reg1))  ; arg1 → reg1
+               (compile-expr arg2 env)
+               (list (list :MOVE *reg-v0* reg2))  ; arg2 → reg2
+               (case op
+                 (+ (list (list :ADD reg1 reg2 *reg-v0*)))
+                 (- (list (list :SUB reg1 reg2 *reg-v0*)))
+                 (* (list (list :MUL reg1 reg2)
+                          (list :MFLO *reg-v0*)))
+                 (/ (list (list :DIV reg1 reg2)
+                          (list :MFLO *reg-v0*)))
+                 (mod (list (list :DIV reg1 reg2)
+                            (list :MFHI *reg-v0*)))
+                 (t (error "Opérateur arithmétique non supporté: ~A" op))))
+            ;; Libérer les registres
+            (free-temp-reg env reg2)
+            (free-temp-reg env reg1)))
+         
+         ;; Cas 2: Un seul registre disponible - spill arg2 sur pile
+         (reg1
+          (prog1
+              (append
+               code1
+               (list (list :MOVE *reg-v0* reg1))  ; arg1 → reg1
+               (compile-expr arg2 env)
+               ;; arg2 reste dans $v0, opération reg1 op $v0
+               (case op
+                 (+ (list (list :ADD reg1 *reg-v0* *reg-v0*)))
+                 (- (list (list :SUB reg1 *reg-v0* *reg-v0*)))
+                 (* (list (list :MUL reg1 *reg-v0*)
+                          (list :MFLO *reg-v0*)))
+                 (/ (list (list :DIV reg1 *reg-v0*)
+                          (list :MFLO *reg-v0*)))
+                 (mod (list (list :DIV reg1 *reg-v0*)
+                            (list :MFHI *reg-v0*)))
+                 (t (error "Opérateur arithmétique non supporté: ~A" op))))
+            (free-temp-reg env reg1)))
+         
+         ;; Cas 3: Aucun registre disponible - utiliser pile pour arg1
+         (t
+          (append
+           code1
+           ;; Sauvegarder arg1 sur la pile
+           (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                 (list :SW *reg-v0* *reg-sp* 0))
+           (compile-expr arg2 env)
+           (list (list :MOVE *reg-v0* *reg-t1*))  ; arg2 → $t1
+           ;; Restaurer arg1 depuis pile
+           (list (list :LW *reg-sp* 0 *reg-t0*)   ; arg1 → $t0
+                 (list :ADDI *reg-sp* 4 *reg-sp*))
+           (case op
+             (+ (list (list :ADD *reg-t0* *reg-t1* *reg-v0*)))
+             (- (list (list :SUB *reg-t0* *reg-t1* *reg-v0*)))
+             (* (list (list :MUL *reg-t0* *reg-t1*)
+                      (list :MFLO *reg-v0*)))
+             (/ (list (list :DIV *reg-t0* *reg-t1*)
+                      (list :MFLO *reg-v0*)))
+             (mod (list (list :DIV *reg-t0* *reg-t1*)
+                        (list :MFHI *reg-v0*)))
+             (t (error "Opérateur arithmétique non supporté: ~A" op))))))))
     
     ;; Plus de 2 arguments: réduire récursivement
     ((> (length args) 2)
