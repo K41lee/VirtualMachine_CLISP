@@ -756,15 +756,9 @@
                             (list :SW *reg-ra* *reg-sp* 4))))
     
     ;; PHASE 9 CLOSURES: Si fonction locale, préparer static link dans $s0
-    ;; Si lexical-depth > 0, on est dans un frame de fonction → passer notre FP
-    ;; Si depth = 0, on est au niveau global ou LABELS body sans frame → garder $S0 du parent
-    (when is-local-fn
-      (if (> (compiler-env-lexical-depth env) 0)
-          ;; On est dans une fonction avec frame → passer notre FP
-          (setf code (append code
-                            (list (list :MOVE (get-reg :fp) *reg-s0*))))
-          ;; On est au niveau global ou LABELS body sans frame → garder $S0 du parent (ne rien faire)
-          ))
+    ;; IMPORTANT: Dans le prologue de chaque fonction, on fait MOVE $FP $S0
+    ;; Donc $S0 contient déjà notre FP pour passer aux enfants.
+    ;; On ne fait rien ici (on garde $S0 = notre FP pour fonctions imbriquées)
     
     ;; Compiler les arguments et les placer dans $a0-$a3
     (loop for arg in args
