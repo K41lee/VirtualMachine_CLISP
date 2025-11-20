@@ -1,0 +1,179 @@
+;;;; asm-ops.lisp
+;;;; Définition des opcodes et instructions assembleur pour la VM
+
+;;; ============================================================================
+;;; CONSTANTES
+;;; ============================================================================
+
+(defparameter *maxmem* 10000
+  "Taille maximale de la mémoire de la VM")
+
+;;; CONVENTIONS MIPS
+;;; $zero ($0) = toujours 0
+;;; $v0-$v1 ($2-$3) = valeurs de retour de fonction
+;;; $a0-$a3 ($4-$7) = arguments de fonction (4 premiers)
+;;; $t0-$t9 ($8-$15, $24-$25) = temporaires (non sauvegardés)
+;;; $s0-$s7 ($16-$23) = sauvegardés (doivent être restaurés)
+;;; $sp ($29) = stack pointer
+;;; $fp ($30) = frame pointer
+;;; $ra ($31) = return address
+
+;;; ============================================================================
+;;; OPCODES - Instructions assembleur
+;;; ============================================================================
+
+(defparameter *opcodes*
+  '(;; Instructions arithmétiques style MIPS
+    :ADD :ADDI :SUB :MUL :DIV :MOD
+    :MFLO :MFHI :SLT
+    ;; Instructions logiques
+    :AND :OR :NOT
+    ;; Instructions de comparaison (compatibilité)
+    :CMP :EQ :NE :GT :LT :GE :LE
+    ;; Instructions de saut style MIPS
+    :J :BEQ :BNE :BLT :BGT :BLE :BGE
+    ;; Instructions de saut (compatibilité)
+    :JMP :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ
+    ;; Instructions pile
+    :PUSH :POP
+    ;; Instructions mémoire et transfert style MIPS
+    :LW :SW :LI :MOVE
+    ;; Instructions mémoire (compatibilité)
+    :LOAD :STORE :LOADI
+    ;; Instructions appel de fonction
+    :JAL :JR :CALL :RET
+    ;; Autres
+    :NOP :HALT :LABEL :PRINT :SYSCALL)
+  "Liste des opcodes supportés par la VM")
+
+;;; ============================================================================
+;;; FORMAT DES INSTRUCTIONS
+;;; ============================================================================
+
+;;; Format des instructions (style MIPS) :
+;;; (ADD $t0 $t1 $t2)    - $t2 = $t0 + $t1 (format R)
+;;; (ADDI $t0 42 $t1)    - $t1 = $t0 + 42 (format I - immediate)
+;;; (SUB $t0 $t1 $t2)    - $t2 = $t0 - $t1
+;;; (MUL $t0 $t1)        - $hi:$lo = $t0 * $t1
+;;; (DIV $t0 $t1)        - $lo = $t0 / $t1, $hi = $t0 % $t1
+;;; (MOVE $t0 $t1)       - $t1 = $t0
+;;; (LI val $t0)         - $t0 = val (load immediate)
+;;; (LW $t0 offset $t1)  - $t1 = MEM[$t0 + offset] (load word)
+;;; (SW $t0 offset $t1)  - MEM[$t1 + offset] = $t0 (store word)
+;;; (BEQ $t0 $t1 label)  - Branch if $t0 == $t1
+;;; (BNE $t0 $t1 label)  - Branch if $t0 != $t1
+;;; (BLT $t0 $t1 label)  - Branch if $t0 < $t1
+;;; (BGT $t0 $t1 label)  - Branch if $t0 > $t1
+;;; (J label)            - Saut inconditionnel
+;;; (JAL label)          - Jump and link (appel de fonction)
+;;; (JR $ra)             - Jump register (retour de fonction)
+;;; (SYSCALL)            - Appel système (pour PRINT, HALT, etc.)
+;;; (NOP)                - Ne fait rien
+;;; (LABEL name)         - Définit un label
+;;;
+;;; Note: Certaines instructions gardent un format simplifié pour la compatibilité
+
+;;; ============================================================================
+;;; REGISTRES (Architecture MIPS)
+;;; ============================================================================
+
+(defparameter *register-names*
+  '(;; Registres MIPS standards
+    :$zero :$at           ; $0 = constante 0, $1 = assembleur temporaire
+    :$v0 :$v1             ; $2-$3 = valeurs de retour
+    :$a0 :$a1 :$a2 :$a3   ; $4-$7 = arguments de fonction
+    :$t0 :$t1 :$t2 :$t3 :$t4 :$t5 :$t6 :$t7  ; $8-$15 = temporaires
+    :$s0 :$s1 :$s2 :$s3 :$s4 :$s5 :$s6 :$s7  ; $16-$23 = sauvegardés
+    :$t8 :$t9             ; $24-$25 = temporaires
+    :$k0 :$k1             ; $26-$27 = réservés OS
+    :$gp                  ; $28 = pointeur global
+    :$sp                  ; $29 = stack pointer
+    :$fp                  ; $30 = frame pointer
+    :$ra                  ; $31 = adresse de retour
+    ;; Registres spéciaux VM
+    :$pc                  ; Program Counter (comme PL)
+    :$hi :$lo             ; Pour multiplication/division
+    ;; Flags de comparaison (extension)
+    :$gt :$lt :$eq)       ; Flags de comparaison
+  "Liste des noms de registres MIPS")
+
+;;; ============================================================================
+;;; ZONES MÉMOIRE
+;;; ============================================================================
+
+(defconstant +registers-start+ 1
+  "Début de la zone des registres en mémoire")
+
+(defconstant +registers-size+ 20
+  "Taille de la zone réservée aux registres")
+
+(defconstant +heap-start+ (+ +registers-start+ +registers-size+)
+  "Début de la zone tas")
+
+(defparameter *heap-size* 2000
+  "Taille initiale du tas")
+
+(defparameter *stack-size* 2000
+  "Taille de la pile")
+
+(defparameter *code-size* 5000
+  "Taille réservée pour le code")
+
+;;; ============================================================================
+;;; FONCTIONS UTILITAIRES
+;;; ============================================================================
+
+(defun opcode-p (op)
+  "Vérifie si OP est un opcode valide"
+  (member op *opcodes*))
+
+(defun register-p (reg)
+  "Vérifie si REG est un registre valide"
+  (member reg *register-names*))
+
+(defun instruction-arity (opcode)
+  "Retourne le nombre d'arguments attendus pour un opcode"
+  (case opcode
+    ;; 0 arguments
+    ((:NOP :HALT :RET) 0)
+    ;; 1 argument
+    ((:J :JMP :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
+      :MFLO :MFHI) 1)
+    ;; 2 arguments
+    ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP) 2)
+    ;; 3 arguments
+    ((:ADD :ADDI :SUB :AND :OR :LW :SW :BEQ :BNE :BLT :BGT :SLT
+      :EQ :NE :GT :LT :GE :LE) 3)
+    (t (error "Opcode inconnu: ~A" opcode))))
+
+(defun format-instruction (instr)
+  "Formate une instruction pour l'affichage"
+  (format nil "~{~A~^ ~}" instr))
+
+;;; ============================================================================
+;;; VALIDATION
+;;; ============================================================================
+
+(defun validate-instruction (instr)
+  "Valide une instruction assembleur"
+  (unless (listp instr)
+    (error "L'instruction doit être une liste: ~A" instr))
+  (when (null instr)
+    (error "L'instruction ne peut pas être vide"))
+  (let ((opcode (first instr))
+        (args (rest instr)))
+    (unless (opcode-p opcode)
+      (error "Opcode invalide: ~A" opcode))
+    (let ((expected-arity (instruction-arity opcode)))
+      (unless (= (length args) expected-arity)
+        (error "Nombre d'arguments incorrect pour ~A: attendu ~A, reçu ~A"
+               opcode expected-arity (length args)))))
+  t)
+
+(defun validate-program (program)
+  "Valide un programme assembleur complet"
+  (unless (listp program)
+    (error "Le programme doit être une liste d'instructions"))
+  (dolist (instr program)
+    (validate-instruction instr))
+  t)

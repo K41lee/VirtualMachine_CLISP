@@ -1,0 +1,481 @@
+================================================================================
+    RÉSUMÉ DU PROJET - COMPILATEUR LISP VERS ASM ET MACHINE VIRTUELLE
+================================================================================
+
+OBJECTIF GLOBAL :
+-----------------
+Concevoir et implémenter en Common LISP un système complet comprenant :
+1. Un COMPILATEUR : transforme du code LISP en code assembleur (ASM)
+2. Une MACHINE VIRTUELLE (VM) : interprète et exécute le code ASM généré
+3. Un CHARGEUR : charge le code ASM dans la mémoire de la VM
+
+FONCTIONNALITÉS À SUPPORTER :
+-----------------------------
+- Fonctions récursives (ex: fibonacci)
+- Structures de contrôle : let, if, loop, select
+- Gestion des paramètres et variables locales avec leur portée
+- Fonctions locales (labels)
+- Fermetures (closures)
+- Délégation à LISP pour fonctions inconnues (funcall/apply)
+
+ARCHITECTURE MÉMOIRE DE LA VM :
+-------------------------------
+Organisation de bas en haut (0 à MAXMEM-1, ne pas utiliser 0) :
+1. VARIABLES BASSES : registres R0, R1, R2, MEM, GT, LT, EQ, PL, FP, SP, etc.
+2. TAS : allocation dynamique
+3. PILE : gestion des appels de fonctions et variables locales
+4. CODE : instructions assembleur
+
+CONTRAINTES IMPORTANTES :
+------------------------
+- Utiliser EXCLUSIVEMENT Common LISP
+- PAS de variables globales
+- Laisser LISP gérer les données
+- Créer des outils de visualisation et de traçage pour le débogage
+
+OBJECTIF DE TEST :
+-----------------
+- Compiler et exécuter fibonacci(20)
+- Comparer les temps d'exécution (VM vs LISP natif)
+- La VM devrait être plus lente que LISP natif
+- À terme : auto-compilation (compiler le chargeur avec la VM, puis la VM elle-même)
+
+================================================================================
+                        PLAN D'ACTION DÉTAILLÉ
+================================================================================
+
+PHASE 1 : MISE EN PLACE DE LA STRUCTURE DE BASE
+===============================================
+
+Étape 1.1 : Création de la structure du projet
+----------------------------------------------
+□ Créer l'arborescence des fichiers :
+  - vm.lisp           : Machine virtuelle
+  - loader.lisp       : Chargeur de code
+  - compiler.lisp     : Compilateur LISP → ASM
+  - asm-ops.lisp      : Définition des opcodes et instructions ASM
+  - utils.lisp        : Outils de visualisation et traçage
+  - tests.lisp        : Fichier de tests
+  - main.lisp         : Point d'entrée principal
+
+Étape 1.2 : Définition des constantes et opcodes
+------------------------------------------------
+□ Définir MAXMEM (taille maximale de la mémoire)
+□ Définir les registres :
+  - R0, R1, R2 : registres généraux
+  - MEM : pointeur mémoire
+  - GT, LT, EQ : flags de comparaison
+  - PL : pointeur de code (Program Location)
+  - FP : Frame Pointer (base de la frame courante)
+  - SP : Stack Pointer (sommet de la pile)
+□ Définir le jeu d'instructions ASM :
+  - Arithmétiques : ADD, SUB, MUL, DIV, MOD
+  - Logiques : AND, OR, NOT
+  - Comparaisons : CMP, JMP, JEQ, JNE, JGT, JLT
+  - Pile : PUSH, POP
+  - Mémoire : LOAD, STORE, MOVE
+  - Appels : CALL, RET
+  - Autres : NOP, HALT, LABEL
+
+PHASE 2 : IMPLÉMENTATION DE LA MACHINE VIRTUELLE
+================================================
+
+Étape 2.1 : Structure de la VM
+------------------------------
+□ Créer une structure/classe VM avec :
+  - memory : vecteur de taille MAXMEM
+  - registres : hash-table ou structure
+  - état : running/halted/error
+□ Implémenter les fonctions d'initialisation :
+  - (make-vm) : crée une nouvelle VM
+  - (reset-vm vm) : réinitialise la VM
+  - (init-registers vm) : initialise les registres
+
+Étape 2.2 : Gestion de la mémoire
+---------------------------------
+□ Implémenter la disposition mémoire :
+  - Zone variables basses (index 1 à N)
+  - Zone tas (allocation dynamique)
+  - Zone pile (croissance descendante)
+  - Zone code (en haut de la mémoire)
+□ Fonctions mémoire :
+  - (mem-read vm addr) : lecture à une adresse
+  - (mem-write vm addr value) : écriture à une adresse
+  - (alloc-memory vm size) : allocation sur le tas
+  - (check-memory-bounds vm addr) : vérification des limites
+
+Étape 2.3 : Gestion des registres
+---------------------------------
+□ Implémenter :
+  - (get-register vm reg) : lire un registre
+  - (set-register vm reg value) : écrire un registre
+  - (dump-registers vm) : afficher tous les registres
+
+Étape 2.4 : Gestion de la pile
+------------------------------
+□ Implémenter :
+  - (push-stack vm value) : empiler une valeur
+  - (pop-stack vm) : dépiler une valeur
+  - (peek-stack vm offset) : lire sans dépiler
+  - (get-stack-frame vm) : obtenir la frame courante
+
+Étape 2.5 : Décodage et exécution des instructions
+--------------------------------------------------
+□ Implémenter le fetch-decode-execute cycle :
+  - (fetch-instruction vm) : récupérer l'instruction au PL
+  - (decode-instruction instr) : décoder l'instruction
+  - (execute-instruction vm instr) : exécuter l'instruction
+□ Implémenter chaque instruction ASM :
+  - Instructions arithmétiques
+  - Instructions logiques
+  - Instructions de comparaison
+  - Instructions de saut
+  - Instructions pile
+  - Instructions mémoire
+  - Instructions d'appel de fonction
+
+Étape 2.6 : Boucle principale d'exécution
+-----------------------------------------
+□ Implémenter (run-vm vm) :
+  - Boucle fetch-decode-execute
+  - Gestion des erreurs
+  - Condition d'arrêt (HALT ou erreur)
+  - Compteur d'instructions pour débogage
+
+Étape 2.7 : Délégation à LISP
+-----------------------------
+□ Implémenter le mécanisme de fallback :
+  - Détecter les fonctions inconnues de la VM
+  - Utiliser funcall/apply pour déléguer à LISP
+  - Gérer les erreurs si LISP ne connaît pas non plus
+
+PHASE 3 : IMPLÉMENTATION DU CHARGEUR
+====================================
+
+Étape 3.1 : Format du code assembleur
+-------------------------------------
+□ Définir le format de représentation du code ASM :
+  - Format texte ou S-expressions ?
+  - Exemple : ((PUSH 5) (PUSH 3) (ADD) (HALT))
+  - Gestion des labels et des adresses
+
+Étape 3.2 : Parser ASM
+---------------------
+□ Implémenter (parse-asm code) :
+  - Validation syntaxique
+  - Résolution des labels
+  - Conversion en format interne
+
+Étape 3.3 : Chargement en mémoire
+---------------------------------
+□ Implémenter (load-code vm asm-code) :
+  - Placer le code en zone CODE
+  - Initialiser PL au début du code
+  - Gérer les symboles et références
+
+Étape 3.4 : Liaison (Linking)
+-----------------------------
+□ Implémenter :
+  - Résolution des adresses symboliques
+  - Table des symboles
+  - Relocation si nécessaire
+
+PHASE 4 : IMPLÉMENTATION DES OUTILS DE DEBUG
+============================================
+
+Étape 4.1 : Visualisation
+-------------------------
+□ Implémenter :
+  - (dump-memory vm start end) : afficher une zone mémoire
+  - (dump-stack vm) : afficher la pile
+  - (dump-code vm) : désassembler le code
+  - (dump-vm-state vm) : état complet de la VM
+
+Étape 4.2 : Traçage
+-------------------
+□ Implémenter :
+  - (trace-execution vm) : mode pas-à-pas
+  - (set-breakpoint vm addr) : points d'arrêt
+  - (log-instruction vm instr) : logger chaque instruction
+  - Mode verbose pour débogage
+
+Étape 4.3 : Statistiques
+------------------------
+□ Implémenter :
+  - Compteur d'instructions exécutées
+  - Profiling (temps par instruction)
+  - Utilisation mémoire
+
+PHASE 5 : IMPLÉMENTATION DU COMPILATEUR (BASE)
+==============================================
+
+Étape 5.1 : Analyse du code source LISP
+---------------------------------------
+□ Implémenter :
+  - (parse-lisp-expr expr) : parser une expression LISP
+  - Reconnaissance des formes spéciales
+  - Construction d'un AST (Abstract Syntax Tree)
+
+Étape 5.2 : Environnement de compilation
+----------------------------------------
+□ Créer une structure pour l'environnement :
+  - Table des variables (locales et paramètres)
+  - Table des fonctions
+  - Gestion des portées (scoping)
+  - Compteur de labels uniques
+
+Étape 5.3 : Compilation des expressions simples
+-----------------------------------------------
+□ Implémenter la compilation de :
+  - Constantes : (compile-const n) → (PUSH n)
+  - Variables : (compile-var x env) → (LOAD x)
+  - Opérations arithmétiques : +, -, *, /
+  - Opérations de comparaison : <, >, =, <=, >=
+
+Étape 5.4 : Compilation des appels de fonction
+----------------------------------------------
+□ Implémenter :
+  - Compilation des arguments (de droite à gauche ou gauche à droite)
+  - Instruction CALL
+  - Gestion de la frame d'appel
+  - Récupération du résultat
+
+PHASE 6 : COMPILATION DES STRUCTURES DE CONTRÔLE
+================================================
+
+Étape 6.1 : Compilation de IF
+-----------------------------
+□ Implémenter (compile-if test then else env) :
+  - Compiler la condition
+  - Générer un saut conditionnel (JEQ/JNE)
+  - Compiler la branche THEN
+  - Saut inconditionnel après THEN
+  - Label pour la branche ELSE
+  - Compiler la branche ELSE
+
+Étape 6.2 : Compilation de LET
+------------------------------
+□ Implémenter (compile-let bindings body env) :
+  - Compiler les expressions d'initialisation
+  - Empiler les valeurs
+  - Créer un nouvel environnement avec les bindings
+  - Compiler le corps
+  - Nettoyer la pile (dépiler les variables locales)
+
+Étape 6.3 : Compilation de LOOP
+-------------------------------
+□ Implémenter (compile-loop body env) :
+  - Label de début de boucle
+  - Compiler le corps
+  - Saut inconditionnel vers le début
+  - Gérer RETURN-FROM pour sortir
+
+Étape 6.4 : Compilation de SELECT/CASE
+--------------------------------------
+□ Implémenter (compile-case expr cases env) :
+  - Compiler l'expression à tester
+  - Pour chaque cas : comparaison et saut conditionnel
+  - Compiler le code de chaque branche
+  - Sauts vers la fin après chaque cas
+
+PHASE 7 : COMPILATION DES FONCTIONS
+===================================
+
+Étape 7.1 : Compilation de DEFUN
+--------------------------------
+□ Implémenter (compile-defun name params body env) :
+  - Générer un label pour la fonction
+  - Prologue : sauvegarder FP, initialiser nouvelle frame
+  - Récupérer les paramètres depuis la pile
+  - Compiler le corps avec les paramètres dans l'environnement
+  - Épilogue : restaurer FP, nettoyer pile, retour
+
+Étape 7.2 : Gestion de la récursivité
+-------------------------------------
+□ Implémenter :
+  - Sauvegarder le contexte avant appel récursif
+  - Restaurer le contexte après retour
+  - Tester avec fibonacci
+
+Étape 7.3 : Compilation de LABELS (fonctions locales)
+-----------------------------------------------------
+□ Implémenter (compile-labels funcs body env) :
+  - Créer un environnement avec les fonctions locales
+  - Générer le code de chaque fonction locale
+  - Compiler le corps avec l'environnement étendu
+
+PHASE 8 : COMPILATION DES FERMETURES
+====================================
+
+Étape 8.1 : Représentation des fermetures
+-----------------------------------------
+□ Concevoir la représentation mémoire :
+  - Pointeur vers le code de la fonction
+  - Pointeur vers l'environnement capturé
+  - Structure sur le tas
+
+Étape 8.2 : Compilation de LAMBDA
+---------------------------------
+□ Implémenter (compile-lambda params body env) :
+  - Générer le code de la fonction
+  - Capturer l'environnement (variables libres)
+  - Allouer une fermeture sur le tas
+  - Retourner un pointeur vers la fermeture
+
+Étape 8.3 : Appel de fermeture
+------------------------------
+□ Implémenter :
+  - Distinguer appel direct vs appel de fermeture
+  - Restaurer l'environnement capturé
+  - Exécuter le code de la fermeture
+
+PHASE 9 : OPTIMISATIONS DU COMPILATEUR
+======================================
+
+Étape 9.1 : Transformations source-à-source
+-------------------------------------------
+□ Implémenter des passes d'optimisation :
+  - Élimination du code mort
+  - Propagation de constantes
+  - Simplification d'expressions
+  - Dépliage de boucles simples (loop unrolling)
+
+Étape 9.2 : Optimisations du code ASM généré
+--------------------------------------------
+□ Implémenter :
+  - Élimination des PUSH/POP consécutifs
+  - Utilisation des registres pour variables temporaires
+  - Factorisation de code commun
+  - Sauts optimisés (élimination sauts vers sauts)
+
+PHASE 10 : TESTS ET VALIDATION
+==============================
+
+Étape 10.1 : Tests unitaires de la VM
+-------------------------------------
+□ Tester chaque instruction ASM individuellement
+□ Tester la gestion de la pile
+□ Tester la gestion de la mémoire
+□ Tester les registres
+
+Étape 10.2 : Tests du chargeur
+------------------------------
+□ Tester le chargement de code simple
+□ Tester la résolution de labels
+□ Tester la gestion d'erreurs
+
+Étape 10.3 : Tests du compilateur
+---------------------------------
+□ Tester expressions simples
+□ Tester structures de contrôle
+□ Tester appels de fonctions
+□ Tester récursivité (fibonacci)
+□ Tester fermetures
+
+Étape 10.4 : Test de fibonacci(20)
+----------------------------------
+□ Écrire fibonacci en LISP
+□ Compiler fibonacci
+□ Charger dans la VM
+□ Compiler l'appel (fibo 20)
+□ Charger l'appel dans la VM
+□ Exécuter
+□ Mesurer le temps avec (time ...)
+□ Comparer avec l'exécution LISP native
+
+Étape 10.5 : Tests supplémentaires
+----------------------------------
+□ Fonction factorielle
+□ Fonction d'Ackermann
+□ Manipulation de listes
+□ Fonctions mutuellement récursives
+
+PHASE 11 : AUTO-COMPILATION (OBJECTIF AVANCÉ)
+=============================================
+
+Étape 11.1 : Compilation du chargeur
+------------------------------------
+□ Compiler le code du chargeur avec la VM
+□ Charger le chargeur compilé dans une VM
+□ Tester le chargeur compilé
+
+Étape 11.2 : Compilation de la VM
+---------------------------------
+□ Compiler le code de la VM avec elle-même
+□ Charger la VM compilée dans une VM
+□ Lancer une VM dans la VM
+□ Tester l'exécution de code dans la VM imbriquée
+
+================================================================================
+                        ORDRE DE PRIORITÉ
+================================================================================
+
+PRIORITÉ 1 (Critique - Faire en premier) :
+- Phase 1 : Structure de base
+- Phase 2 : Machine virtuelle complète
+- Phase 3 : Chargeur
+- Phase 4 : Outils de debug (au fur et à mesure)
+
+PRIORITÉ 2 (Important) :
+- Phase 5 : Compilateur de base
+- Phase 6 : Structures de contrôle
+- Phase 7 : Fonctions et récursivité
+- Phase 10.4 : Test fibonacci(20)
+
+PRIORITÉ 3 (Fonctionnalités avancées) :
+- Phase 8 : Fermetures
+- Phase 9 : Optimisations
+- Phase 10 : Tests exhaustifs
+
+PRIORITÉ 4 (Bonus) :
+- Phase 11 : Auto-compilation
+
+================================================================================
+                        NOTES IMPORTANTES
+================================================================================
+
+1. DÉVELOPPEMENT INCRÉMENTAL :
+   - Implémenter, tester, déboguer chaque composant avant de passer au suivant
+   - Commencer simple, complexifier progressivement
+   - Toujours avoir une version fonctionnelle
+
+2. PAS DE VARIABLES GLOBALES :
+   - Passer la VM comme paramètre
+   - Passer l'environnement de compilation comme paramètre
+   - Utiliser des closures si nécessaire
+
+3. OUTILS DE DEBUG :
+   - Les implémenter dès le début
+   - Mode verbose pour tracer l'exécution
+   - Sauvegarder les états intermédiaires
+
+4. GESTION D'ERREURS :
+   - Valider les entrées
+   - Messages d'erreur clairs
+   - Récupération gracieuse quand possible
+
+5. DOCUMENTATION :
+   - Commenter le code
+   - Documenter le format ASM
+   - Documenter les conventions d'appel
+   - Documenter la disposition mémoire
+
+6. PERFORMANCE :
+   - Ne pas optimiser prématurément
+   - D'abord corrects, ensuite rapides
+   - La VM sera plus lente que LISP natif (c'est normal)
+
+================================================================================
+                        PROCHAINES ÉTAPES IMMÉDIATES
+================================================================================
+
+1. Créer l'arborescence des fichiers du projet
+2. Définir les constantes et opcodes dans asm-ops.lisp
+3. Implémenter la structure de base de la VM dans vm.lisp
+4. Implémenter les fonctions de gestion mémoire
+5. Commencer le jeu d'instructions avec les instructions simples
+6. Créer des tests unitaires au fur et à mesure
+
+================================================================================
+
+Fin du plan d'action - Bonne chance pour l'implémentation ! 🚀

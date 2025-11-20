@@ -1,0 +1,19 @@
+En CLISP exclusivement. laisser lisp se chargé de la gestion des données.
+/!\ Pas de variables globales, pensez à faire des outils pour visualisez, tracez.
+
+- Virtual Machine
+    - mémoire (montante), de bas en haut : variables basses, tas, pile, Code. ( de 0 à MAXMEM-1, ne pas utiliser 0)
+        - Attributs (variables basses), tout les registres : 'R0 'R1 'R2 'MEM 'GT 'LT 'EQ 'PL 'FP 'SP ect
+        - si la vm ne connait pas une fonction du code, externalisez à lisp, funcall ... apply ... 
+            (si lisp ne connait pas non plus alors erreur)
+- Chargeur
+
+- Executer du code assembleur
+
+- Compilateur :
+    - Transformation source à source
+    - ...
+    - test : compile et executer fibonacci(20), utiliser time pour comparer le temps d'éxécution dans lisp et 
+        dans la vm (la vm devrait être plus lente que lisp ), puis d'autres code
+    - a terme : pouvoir compiler avec la vm le chargeur. Puis compiler avec la vm la vm et 
+        lancer une nouvelle vm dans la vm avec le chargeur compiler par la première vm.
