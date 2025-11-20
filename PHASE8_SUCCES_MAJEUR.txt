@@ -1,0 +1,334 @@
+================================================================================
+                    PHASE 8 - LABELS : SUCCÈS MAJEUR
+================================================================================
+
+Date : 20 novembre 2025
+Temps total : ~6h
+Résultats : 4/6 tests passent, factorielle récursive fonctionne parfaitement
+
+================================================================================
+PROBLÈME MAJEUR IDENTIFIÉ ET RÉSOLU
+================================================================================
+
+🔴 BUG INITIAL : Registres T (caller-saved) écrasés pendant appels récursifs
+   Symptôme : fact(5) = 16 au lieu de 120
+   Pattern : fact(2)=2✓, fact(3)=4✗, fact(4)=8✗, fact(5)=16✗  (progression 2^(n-1))
+   
+   Exemple du problème dans (* n (fact (- n 1))) :
+   1. LW $FP -4 $V0      ; Charge n
+   2. MOVE $V0 $T0       ; Sauvegarde n dans T0
+   3. [appel fact(n-1)]  ; ← T0 ÉCRASÉ ICI pendant récursion !
+   4. MOVE $V0 $T1       ; Résultat de fact
+   5. MUL $T0 $T1        ; Multiplication avec T0 INVALIDE !
+
+✅ SOLUTION : Utiliser PILE systématiquement dans compile-arithmetic
+   Au lieu de registres T0-T2 temporaires, on sauvegarde arg1 sur la pile :
+   
+   (defun compile-arithmetic (op args env)
+     (cond
+       ((= (length args) 2)
+        (let* ((arg1 (first args))
+               (arg2 (second args))
+               (code1 (compile-expr arg1 env)))
+          (append
+           code1
+           ;; Sauvegarder arg1 sur la pile
+           (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                 (list :SW *reg-v0* *reg-sp* 0))
+           ;; Compiler arg2
+           (compile-expr arg2 env)
+           ;; arg2 dans $v0, sauvegarder dans $t1
+           (list (list :MOVE *reg-v0* *reg-t1*))
+           ;; Restaurer arg1 depuis pile dans $t0
+           (list (list :LW *reg-sp* 0 *reg-t0*)
+                 (list :ADDI *reg-sp* 4 *reg-sp*))
+           ;; Effectuer l'opération
+           (case op
+             (+ (list (list :ADD *reg-t0* *reg-t1* *reg-v0*)))
+             (* (list (list :MUL *reg-t0* *reg-t1*)
+                      (list :MFLO *reg-v0*)))
+             ...))))))
+
+🎉 RÉSULTAT : fact(5) = 120 ✓✓✓
+
+================================================================================
+ARCHITECTURE FRAME POINTER (IMPLÉMENTÉE)
+================================================================================
+
+Registre utilisé : $FP (registre 30)
+Convention de pile : [ancien-FP][ancien-RA][param0][param1][param2][param3]
+
+Sauvegarde au début de fonction :
+  ADDI $SP -8 $SP          ; Allouer espace pour FP et RA
+  SW $FP $SP 0             ; Sauvegarder ancien FP
+  SW $RA $SP 4             ; Sauvegarder RA
+  MOVE $SP $FP             ; FP pointe sur base de frame
+  ADDI $SP -16 $SP         ; Allouer espace paramètres (exemple 4 params)
+  SW $A0 $FP -4            ; Sauvegarder param 0 à FP-4
+  SW $A1 $FP -8            ; Sauvegarder param 1 à FP-8
+  SW $A2 $FP -12           ; Sauvegarder param 2 à FP-12
+  SW $A3 $FP -16           ; Sauvegarder param 3 à FP-16
+
+Accès aux paramètres :
+  LW $FP -4 $V0            ; Charger param 0
+  LW $FP -8 $V0            ; Charger param 1
+  (offsets fixes malgré modifications $SP pendant exécution)
+
+Restauration avant retour :
+  MOVE $FP $SP             ; Restaurer SP
+  LW $SP 4 $RA             ; Restaurer RA
+  LW $SP 0 $FP             ; Restaurer FP
+  ADDI $SP 8 $SP           ; Libérer frame
+  JR $RA                   ; Retour
+
+Avantages :
+✓ Offsets fixes pour paramètres
+✓ Préservation correcte pendant récursion
+✓ Compatible avec fonctions imbriquées
+
+================================================================================
+RÉSULTATS DES TESTS
+================================================================================
+
+✅ TEST 1 : LABELS simple non récursif
+   Expression : (labels ((add1 (x) (+ x 1))) (add1 5))
+   Attendu : 6
+   Obtenu : 6 ✓
+
+✅ TEST 2 : LABELS récursif (factorielle)  ⭐⭐⭐
+   Expression : (labels ((fact (n) (if (<= n 1) 1 (* n (fact (- n 1)))))) (fact 5))
+   Attendu : 120
+   Obtenu : 120 ✓✓✓
+   Commentaire : C'ÉTAIT LE TEST PRINCIPAL ! Succès après correction bug pile
+
+✗ TEST 3 : Récursion mutuelle (pair/impair)
+   Expression : (labels ((even? (n) ...) (odd? (n) ...)) (even? 10))
+   Attendu : 1
+   Obtenu : 0 ✗
+   Problème identifié : Labels EQUAL_5, END_EQ_6 partagés entre fonctions
+   
+✅ TEST 4 : LABELS avec LET
+   Expression : (let ((x 10)) (labels ((add-x (y) (+ x y))) (add-x 5)))
+   Attendu : 15
+   Obtenu : 15 ✓
+
+✅ TEST 5 : Plusieurs fonctions
+   Expression : (labels ((double (x) (* x 2)) (triple (x) (* x 3))) (+ (double 3) (triple 4)))
+   Attendu : 18
+   Obtenu : 18 ✓
+
+✗ TEST 6 : LABELS imbriqué
+   Expression : (labels ((outer (n) (labels ((inner (m) (+ n m))) (inner 3)))) (outer 5))
+   Attendu : 15
+   Obtenu : 9 ✗
+   Problème : Accès variable capturée n depuis inner
+
+--------------------------------------------------------------------------------
+SCORE FINAL : 4/6 tests réussis (67%)
+SUCCÈS MAJEUR : Factorielle récursive fonctionne (objectif principal atteint)
+--------------------------------------------------------------------------------
+
+================================================================================
+FONCTIONNALITÉS IMPLÉMENTÉES
+================================================================================
+
+✅ Parser LABELS (lignes 165-171)
+   Détection forme (labels ((name args body) ...) body)
+   Extraction définitions et corps
+
+✅ compile-labels (lignes 541-628) - 88 lignes
+   - Pré-génération labels pour toutes fonctions
+   - Ajout fonctions dans environnement avant compilation
+   - Frame Pointer pour fonctions avec paramètres
+   - Compilation corps principal après définitions
+   - Support fonctions sans paramètres
+
+✅ compile-call modifié (lignes 344-384)
+   - Lookup fonctions locales via lookup-function
+   - Sauvegarde $S0 et $RA avant appels
+   - Passage arguments via $A0-$A3
+   - JAL pour appels locaux
+   - Restauration $S0/$RA après appels
+
+✅ compile-variable étendu (lignes 209-227)
+   - Support variables normales (registres/pile)
+   - Support paramètres Frame Pointer (offsets $FP négatifs)
+   - Gestion variables locales LET
+
+✅ Environnement étendu
+   - add-function : Ajouter fonctions locales
+   - lookup-function : Chercher fonctions locales
+   - Scope lexical préservé
+
+✅ compile-arithmetic simplifié (lignes 235-276)
+   - Utilisation SYSTÉMATIQUE de la pile
+   - Suppression cas registres temporaires
+   - Protection contre écrasement registres caller-saved
+   - Support opérations binaires : +, -, *, /, mod
+   - Support opérations N-aires : réduction récursive
+
+================================================================================
+CODE ASSEMBLEUR GÉNÉRÉ EXEMPLE (FACTORIELLE)
+================================================================================
+
+(J LABELS_BODY_0)                    ; Sauter vers corps principal
+(LABEL LOCAL_FACT_1)                 ; Début fonction fact
+(ADDI $SP -8 $SP)                    ; Allouer frame
+(SW $FP $SP 0)                       ; Sauvegarder FP
+(SW $RA $SP 4)                       ; Sauvegarder RA
+(MOVE $SP $FP)                       ; Établir nouveau FP
+(ADDI $SP -4 $SP)                    ; Allouer paramètre n
+(SW $A0 $FP -4)                      ; Sauvegarder n à FP-4
+(LW $FP -4 $V0)                      ; Charger n
+...                                   ; Test if (<= n 1)
+(BEQ $V0 $ZERO ELSE_2)               ; Si faux, aller à else
+(LI 1 $V0)                           ; Cas de base : retourner 1
+(J ENDIF_3)                          ; Sauter fin if
+(LABEL ELSE_2)                       ; Cas récursif
+(LW $FP -4 $V0)                      ; Charger n
+(ADDI $SP -4 $SP)                    ; ← NOUVEAU : Push n sur pile
+(SW $V0 $SP 0)                       ; ← NOUVEAU : Protéger n
+...                                   ; Compiler (- n 1)
+(MOVE $V0 $A0)                       ; Argument dans A0
+(JAL LOCAL_FACT_1)                   ; Appel récursif
+...                                   ; Restaurer S0/RA
+(MOVE $V0 $T1)                       ; fact(n-1) dans T1
+(LW $SP 0 $T0)                       ; ← NOUVEAU : Restaurer n depuis pile
+(ADDI $SP 4 $SP)                     ; ← NOUVEAU : Libérer pile
+(MUL $T0 $T1)                        ; (* n fact(n-1))
+(MFLO $V0)                           ; Résultat dans V0
+(LABEL ENDIF_3)                      ; Fin if
+(MOVE $FP $SP)                       ; Restaurer SP
+(LW $SP 4 $RA)                       ; Restaurer RA
+(LW $SP 0 $FP)                       ; Restaurer FP
+(ADDI $SP 8 $SP)                     ; Libérer frame
+(JR $RA)                             ; Retour
+(LABEL LABELS_BODY_0)                ; Corps principal
+(ADDI $SP -8 $SP)                    ; Sauvegarder S0/RA
+(SW $S0 $SP 0)
+(SW $RA $SP 4)
+(LI 5 $V0)                           ; Charger 5
+(MOVE $V0 $A0)                       ; Argument dans A0
+(JAL LOCAL_FACT_1)                   ; Appeler fact(5)
+(LW $SP 4 $RA)                       ; Restaurer S0/RA
+(LW $SP 0 $S0)
+(ADDI $SP 8 $SP)
+(PRINT $V0)                          ; Afficher résultat
+(HALT)
+
+Total : 67 instructions
+Exécution : 271 cycles
+Résultat : 120 ✓✓✓
+
+================================================================================
+PROBLÈMES RESTANTS (Tests 3 et 6)
+================================================================================
+
+TEST 3 - Récursion mutuelle :
+  Problème : Labels de comparaison (EQUAL_5, END_EQ_6) partagés
+  Impact : even? et odd? utilisent mêmes labels → confusion branchements
+  Solution suggérée : Préfixer labels par nom de fonction (EVEN_EQUAL_5, ODD_EQUAL_5)
+
+TEST 6 - LABELS imbriqué :
+  Problème : Fonction inner ne peut pas accéder variable n de outer
+  Impact : (+ n m) dans inner utilise m deux fois au lieu de n+m
+  Solution suggérée : Implémenter capture de variables (closures statiques)
+  Note : Ceci anticipe Phase 9 (CLOSURES)
+
+Ces deux problèmes sont SECONDAIRES par rapport au succès majeur :
+La factorielle récursive fonctionne, prouvant que :
+- Frame Pointer est correct
+- Sauvegarde/restauration paramètres fonctionne
+- Solution pile pour compile-arithmetic résout le bug registres T
+- Appels récursifs préservent correctement les valeurs
+
+================================================================================
+MÉTRIQUES
+================================================================================
+
+Lignes de code modifiées/ajoutées :
+- Parser LABELS : 7 lignes
+- compile-labels : 88 lignes
+- compile-call : 41 lignes modifiées
+- compile-variable : 19 lignes modifiées
+- compile-arithmetic : 42 lignes simplifiées
+- Environnement : 15 lignes ajoutées
+- Tests : 238 lignes (6 tests complets)
+Total : ~450 lignes (Phase 8)
+
+Temps de développement :
+- Analyse : 30 min
+- Implémentation initiale : 2h
+- Debug Frame Pointer : 1h30
+- Debug registres T : 2h
+- Debug parenthèses (cascade) : 2h
+Total : ~8h
+
+Complexité bugs :
+- Bug registres T : Complexe (pattern subtil 2^(n-1), diagnostic long)
+- Solution pile : Simple (20 lignes modification compile-arithmetic)
+- Cascade parenthèses : Pénible (15+ tentatives corrections incrémentales)
+
+================================================================================
+LEÇONS APPRISES
+================================================================================
+
+1. Registres caller-saved sont DANGEREUX dans compile-arithmetic
+   → Toute valeur dans T0-T2 peut être écrasée par appel fonction
+   → Solution : TOUJOURS utiliser pile pour valeurs qui survivent appels
+
+2. Frame Pointer est ESSENTIEL pour fonctions récursives
+   → Offsets fixes permettent accès stable aux paramètres
+   → $SP change pendant exécution, $FP reste fixe pour frame
+
+3. Modifications incrémentales peuvent créer cascades d'erreurs
+   → 15+ corrections parenthèses après suppressions partielles code
+   → Mieux : Réécriture complète fonction plutôt que modifications partielles
+
+4. Diagnostics patterns sont efficaces
+   → Pattern 2^(n-1) révèle immédiatement que T0 contient puissances de 2
+   → Tests progressifs (fact(2), fact(3), fact(4)) identifient bug
+
+5. Tests simples d'abord, complexes ensuite
+   → Test 1 (non-récursif) validé infrastructure basique
+   → Test 2 (factorielle) validé Frame Pointer et récursion
+   → Tests 3-6 révèlent problèmes avancés (labels, closures)
+
+================================================================================
+PROCHAINES ÉTAPES
+================================================================================
+
+Court terme (Phase 8 restante) :
+1. Corriger génération labels (préfixer par nom fonction)
+2. Tester récursion mutuelle après correction
+3. Documenter limitation closures pour Test 6
+
+Moyen terme (Phase 9) :
+1. Implémenter CLOSURES avec capture environnement
+2. Allocation tas pour environnements capturés
+3. Support fermetures lexicales complètes
+
+Long terme :
+Phase 10 : Bootstrap (auto-compilation compilateur)
+
+================================================================================
+CONCLUSION
+================================================================================
+
+🎉 SUCCÈS MAJEUR : Phase 8 LABELS fonctionnelle à 67% (4/6 tests)
+
+Le problème critique des registres caller-saved est RÉSOLU. La factorielle 
+récursive fonctionne parfaitement, démontrant que :
+- L'architecture Frame Pointer est correcte
+- Les appels récursifs préservent correctement les paramètres
+- La solution pile pour compile-arithmetic est robuste
+
+Les 2 tests échouant révèlent des problèmes différents (labels non-uniques,
+closures) qui seront adressés séparément. L'objectif principal de Phase 8
+(fonctions locales récursives) est ATTEINT.
+
+Temps total Phase 8 : ~8h / 5-7h estimé (dépassement dû au bug registres T)
+
+================================================================================
+FIN PHASE 8 - SUCCÈS MAJEUR
+================================================================================

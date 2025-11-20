@@ -1,0 +1,369 @@
+================================================================================
+                    PHASE 8 : LABELS - ÉTAT ACTUEL
+================================================================================
+Date : Session en cours
+Temps investi : ~4h (analyse 30min + implémentation 2h + debug 1h30)
+
+================================================================================
+                          RÉSUMÉ PHASE 8
+================================================================================
+
+OBJECTIF : Implémenter LABELS pour définir des fonctions locales avec :
+  - Portée lexicale
+  - Récursion simple (fonction s'appelle elle-même)
+  - Récursion mutuelle (fonctions s'appellent entre elles)
+  - Maximum 4 paramètres (A0-A3)
+  - Appels locaux prioritaires sur globaux
+
+SYNTAXE :
+  (labels ((fn1 args1 body1) (fn2 args2 body2) ...) body-principal)
+
+================================================================================
+                        IMPLÉMENTATION COMPLÉTÉE
+================================================================================
+
+✓ 1. ANALYSE THÉORIQUE (30 min)
+   - Document : PHASE8_LABELS_ANALYSE.txt (~500 lignes)
+   - Sémantique LABELS vs DEFUN/LET/FLET
+   - Portée lexicale détaillée
+   - Récursion mutuelle
+   - 12 exemples détaillés
+   - Plan implémentation 10 étapes (5-7h estimé)
+
+✓ 2. PARSER LABELS (compiler.lisp lignes 165-171)
+   - Validation syntaxe : (labels ((fn args body) ...) body)
+   - Parse definitions + body
+   - Intégration dans parse-lisp-expr
+
+✓ 3. FONCTIONS AUXILIAIRES (lignes 75-82)
+   - add-function(env, fn-name, fn-label)
+   - lookup-function(env, fn-name) → label ASM ou NIL
+   - Ajout dans compiler-env-functions
+
+✓ 4. COMPILE-LABELS (lignes 537-585)
+   Structure :
+   a) Pré-génération labels ASM (récursion mutuelle)
+      - gen-label pour chaque fonction
+      - add-function dans environnement
+      - Stocker fn-infos
+   
+   b) JMP LABELS_BODY (sauter définitions)
+   
+   c) Pour chaque fonction :
+      - LABEL LOCAL_FN_n
+      - Mapper paramètres → A0-A3
+      - Compiler corps dans fn-env
+      - JR $RA
+   
+   d) LABEL LABELS_BODY
+   
+   e) Compiler corps principal
+   
+   Simplifications apportées :
+   - let* pour body-label au début
+   - let* flat dans dolist (fn-env et arg-regs)
+   - Évite imbrication excessive
+
+✓ 5. COMPILE-CALL MODIFIÉ (lignes 641-670)
+   - target-label = lookup-function OU func-name
+   - Sauvegarde $S0 ET $RA (pile -8)
+   - Compiler arguments dans A0-A3
+   - JAL target-label (local ou global)
+   - Restaurer $RA et $S0 (pile +8)
+
+✓ 6. INTÉGRATION COMPILE-EXPR (ligne 629)
+   - Case (:labels (compile-labels ...))
+   - Appel compile-labels avec definitions et body
+
+✓ 7. TESTS CRÉÉS (test-labels.lisp, 220 lignes)
+   - 6 fonctions test
+   - 1 fonction run-all-labels-tests
+   - Descriptions détaillées
+
+================================================================================
+                          ÉTAT DES TESTS
+================================================================================
+
+Tests créés : 6
+Tests réussis : 1/6 (16.7%)
+Tests échoués : 5/6 (83.3%)
+
+DÉTAILS :
+
+✓ TEST 1 : LABELS simple non récursif
+  Expression : (labels ((double (x) (* x 2))) (double 5))
+  Attendu : 10
+  Obtenu : 10
+  Statut : ✓ RÉUSSI
+
+✗ TEST 2 : LABELS récursif (factorielle)
+  Expression : (labels ((fact (n) (if (<= n 1) 1 (* n (fact (- n 1)))))) (fact 5))
+  Attendu : 120
+  Obtenu : 1
+  Statut : ✗ ÉCHOUÉ
+  
+  Problème probable :
+  - Condition (<= n 1) toujours vraie ?
+  - Vérifier compilation <=
+  - Sauvegarde/restauration paramètre n
+
+✗ TEST 3 : Récursion mutuelle (pair/impair)
+  Expression : (labels ((even? (n) (if (= n 0) 1 (odd? (- n 1))))
+                        (odd? (n) (if (= n 0) 0 (even? (- n 1)))))
+                 (even? 10))
+  Attendu : 1
+  Obtenu : 0
+  Statut : ✗ ÉCHOUÉ
+  
+  Problème probable :
+  - Inversion résultat
+  - Vérifier = et conditions
+
+✗ TEST 4 : LABELS avec LET
+  Expression : (let ((x 10)) (labels ((add-x (y) (+ x y))) (add-x 5)))
+  Attendu : 15
+  Obtenu : 10
+  Statut : ✗ ÉCHOUÉ
+  
+  Problème :
+  - Variable LET (x) non capturée par fonction LABELS
+  - add-x devrait avoir accès à x dans environnement parent
+  - Code : (MOVE $T0 $V0) (MOVE $V0 $T1) (MOVE $A0 $V0) (MOVE $V0 $T2)
+  - On obtient 10 (valeur y) au lieu de 15 (x+y)
+  
+  Cause probable :
+  - copy-env ne copie pas correctement variables LET
+  - Environnement fn-env manque variable x
+
+✗ TEST 5 : Plusieurs fonctions
+  Expression : (labels ((double (x) (* x 2))
+                        (triple (x) (* x 3))
+                        (sum-both (x) (+ (double x) (triple x))))
+                 (sum-both 4))
+  Attendu : 20 (8 + 12)
+  Obtenu : 0
+  Statut : ✗ ÉCHOUÉ
+  
+  Problème :
+  - Appels imbriqués double/triple
+  - Paramètre x pas propagé ?
+  - Vérifier sauvegarde paramètre avant appels
+
+✗ TEST 6 : LABELS imbriqué
+  Expression : (labels ((outer (x)
+                          (labels ((inner (y) (* x y)))
+                            (inner 3))))
+                 (outer 5))
+  Attendu : 15
+  Obtenu : 9
+  Statut : ✗ ÉCHOUÉ
+  
+  Problème :
+  - LABELS imbriqués
+  - Variable x outer non accessible dans inner
+  - Obtenu 9 = 3*3 ? (inner s'appelle avec y=3)
+  - Devrait être 5*3 = 15
+
+================================================================================
+                        PROBLÈMES IDENTIFIÉS
+================================================================================
+
+1. ✓ RÉSOLU : Parenthèses déséquilibrées compiler.lisp
+   - compile-labels : 92 '(' vs 94 ')' → Réécriture complète
+   - compile-call : 1 ')' en trop → Retiré
+   - Résultat : Fichier se charge correctement
+
+2. ✓ RÉSOLU : Ordre MOVE inversé
+   - compile-call ligne 660 : (MOVE $V0 reg) était incorrect
+   - Correction : (MOVE reg $V0) → paramètre V0 copié dans reg
+   - Test 1 passe maintenant
+
+3. ✗ EN COURS : Capture environnement LET
+   - Variables LET non accessibles dans fonctions LABELS
+   - copy-env ne copie pas les variables ?
+   - Test 4 échoue (10 au lieu de 15)
+
+4. ✗ À INVESTIGUER : Récursion paramètres
+   - Tests récursifs échouent
+   - Paramètres pas propagés correctement ?
+   - Sauvegarde/restauration registres
+
+5. ✗ À INVESTIGUER : Conditions <= et =
+   - Test 2 (fact) retourne toujours 1
+   - Condition (<= n 1) toujours vraie ?
+
+================================================================================
+                      CODE ASSEMBLEUR GÉNÉRÉ
+================================================================================
+
+EXEMPLE TEST 1 (RÉUSSI) :
+(labels ((double (x) (* x 2))) (double 5))
+
+ASM :
+(J LABELS_BODY_0)               ; Sauter définitions
+(LABEL LOCAL_DOUBLE_1)          ; Début fonction double
+(MOVE $A0 $V0)                  ; Copier paramètre x dans V0
+(MOVE $V0 $T0)                  ; Sauvegarder x
+(LI 2 $V0)                      ; Charger 2
+(MOVE $V0 $T1)                  ; Sauvegarder 2
+(MUL $T0 $T1)                   ; x * 2
+(MFLO $V0)                      ; Résultat dans V0
+(JR $RA)                        ; Retour
+(LABEL LABELS_BODY_0)           ; Corps principal
+(ADDI $SP -8 $SP)               ; Allouer pile
+(SW $S0 $SP 0)                  ; Sauvegarder S0
+(SW $RA $SP 4)                  ; Sauvegarder RA
+(LI 5 $V0)                      ; Argument 5
+(MOVE $V0 $A0)                  ; Placer dans A0
+(JAL LOCAL_DOUBLE_1)            ; Appel double
+(LW $SP 4 $RA)                  ; Restaurer RA
+(LW $SP 0 $S0)                  ; Restaurer S0
+(ADDI $SP 8 $SP)                ; Libérer pile
+(PRINT $V0)                     ; Afficher résultat
+(HALT)                          ; Fin
+
+Résultat : 10 ✓
+
+EXEMPLE TEST 4 (ÉCHOUÉ - Capture LET) :
+(let ((x 10)) (labels ((add-x (y) (+ x y))) (add-x 5)))
+
+ASM LOCAL_ADD-X :
+(MOVE $T0 $V0)                  ; Copier x (T0) dans V0
+(MOVE $V0 $T1)                  ; T1 = V0
+(MOVE $A0 $V0)                  ; Copier y (A0) dans V0
+(MOVE $V0 $T2)                  ; T2 = V0
+(ADD $T1 $T2 $V0)               ; T1 + T2
+
+Problème : x devrait être dans T0, y dans A0
+Mais x (T0) semble vide ou incorrect
+
+Résultat : 10 (devrait être 15) ✗
+
+================================================================================
+                          ARCHITECTURE
+================================================================================
+
+REGISTRES :
+  - A0-A3 : Paramètres fonctions (max 4)
+  - V0 : Retour fonctions
+  - S0-S3 : Sauvegardés
+  - T0-T3 : Temporaires
+  - RA : Adresse retour
+  - SP : Stack pointer
+
+PILE (appels LABELS) :
+  +--------+
+  | $S0    | SP+0
+  +--------+
+  | $RA    | SP+4
+  +--------+
+  
+  Allocation : ADDI $SP -8 $SP
+  Libération : ADDI $SP 8 $SP
+
+ENVIRONNEMENT :
+  compiler-env-functions : Alist (fn-name . fn-label)
+  
+  Lookup ordre :
+  1. lookup-function env → label local
+  2. func-name global (DEFUN)
+
+LABELS ASM :
+  LOCAL_FN_n : Fonction locale n
+  LABELS_BODY_n : Corps principal n
+
+================================================================================
+                        PLAN CORRECTION
+================================================================================
+
+PRIORITÉ 1 : Corriger capture environnement LET (Test 4)
+  - Vérifier copy-env copie bien variables
+  - Ajouter debug dans compile-labels
+  - S'assurer fn-env hérite de new-env
+
+PRIORITÉ 2 : Debug récursion simple (Test 2)
+  - Analyser code ASM fact en détail
+  - Vérifier (<= n 1) génération
+  - Trace exécution avec clisp
+
+PRIORITÉ 3 : Debug récursion mutuelle (Test 3)
+  - Vérifier lookup fonctions mutuelles
+  - Conditions = et if
+
+PRIORITÉ 4 : Debug appels imbriqués (Test 5)
+  - Sauvegarde paramètre x avant appels
+  - Restauration après double/triple
+
+PRIORITÉ 5 : Debug LABELS imbriqués (Test 6)
+  - Portée lexicale outer → inner
+  - Variable x outer accessible inner
+
+================================================================================
+                        MÉTRIQUES PHASE 8
+================================================================================
+
+Lignes code ajoutées : ~150 lignes
+  - compile-labels : 50 lignes
+  - compile-call modifié : 30 lignes
+  - Parser : 10 lignes
+  - Fonctions auxiliaires : 10 lignes
+  - Tests : 220 lignes
+  - Documentation : 500+ lignes
+
+Fonctions modifiées :
+  - compile-call (ligne 641-670)
+  - parse-lisp-expr (ligne 165-171)
+  - compile-expr (ligne 629)
+
+Fonctions ajoutées :
+  - add-function
+  - lookup-function
+  - compile-labels
+
+Tests :
+  - Total : 6
+  - Réussis : 1 (16.7%)
+  - Échoués : 5 (83.3%)
+  - Taux succès : 16.7%
+
+Temps investi : ~4h
+  - Analyse : 30 min ✓
+  - Implémentation : 2h ✓
+  - Debug syntaxe : 1h ✓
+  - Debug logique : 30 min (en cours)
+
+Temps estimé restant : 2-3h
+  - Correction tests : 2h
+  - Documentation finale : 30 min
+  - Validation : 30 min
+
+================================================================================
+                          NEXT STEPS
+================================================================================
+
+1. Corriger Test 4 (capture LET) → Bloquer principal
+2. Corriger Test 2 (récursion simple) → Fondamental
+3. Corriger Tests 3, 5, 6 → Avancés
+4. Créer PHASE8_LABELS_COMPLETE.txt
+5. Mettre à jour todo list (tâches 10-12)
+6. Préparer Phase 9 (CLOSURES)
+
+================================================================================
+                          CONCLUSION
+================================================================================
+
+Phase 8 : Structure de base LABELS implémentée et fonctionnelle.
+- Parser LABELS : ✓ OK
+- compile-labels : ✓ OK (structure complète)
+- compile-call lookup local : ✓ OK
+- Test simple : ✓ RÉUSSI (10)
+- Tests avancés : ✗ 5/6 échecs
+
+Problèmes principaux :
+1. Capture environnement LET
+2. Récursion (paramètres, conditions)
+3. LABELS imbriqués
+
+La fondation est solide, debug en cours.
+
+================================================================================

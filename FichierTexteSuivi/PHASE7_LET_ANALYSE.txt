@@ -1,0 +1,489 @@
+================================================================================
+                    PHASE 7a : IMPLÉMENTATION LET
+                   Analyse et Conception Détaillée
+================================================================================
+
+DATE : 20 novembre 2025
+STATUT : EN COURS
+
+================================================================================
+                    1. ANALYSE THÉORIQUE
+================================================================================
+
+1.1. SÉMANTIQUE LET vs LET*
+----------------------------
+
+LET : Évaluation PARALLÈLE
+--------------------------
+(let ((x 1) (y 2))
+  (+ x y))
+
+Sémantique :
+  1. Évaluer TOUTES les valeurs (1, 2) dans l'environnement COURANT
+  2. Créer nouveau scope avec bindings (x→1, y→2)
+  3. Évaluer body dans nouveau scope
+  4. Retourner résultat
+
+Exemple portée :
+(let ((x 10))
+  (let ((x 20) (y x))  ; y voit le x EXTERNE (10), pas le x LOCAL
+    y))
+→ 10
+
+LET* : Évaluation SÉQUENTIELLE
+-------------------------------
+(let* ((x 1) (y (* x 2)))  ; y peut utiliser x
+  (+ x y))
+
+Sémantique :
+  1. Évaluer première valeur (1) dans environnement COURANT
+  2. Ajouter binding (x→1) à l'environnement
+  3. Évaluer deuxième valeur (* x 2) dans NOUVEL environnement (avec x)
+  4. Ajouter binding (y→2)
+  5. Évaluer body
+  6. Retourner résultat
+
+DÉCISION : Implémenter LET d'abord (plus simple), LET* ensuite
+
+1.2. REPRÉSENTATION EN MÉMOIRE
+-------------------------------
+
+Options :
+---------
+A) REGISTRES uniquement (limité, 3 registres temporaires disponibles)
+B) PILE uniquement (flexible mais plus lent)
+C) HYBRIDE : Registres d'abord, puis pile (OPTIMAL ✓)
+
+STRATÉGIE CHOISIE : HYBRIDE
+----------------------------
+- Variables fréquentes → Registres $t0, $t1, $t2
+- Variables supplémentaires → Pile ($sp)
+- Frame pointer optionnel ($fp pour debug)
+
+Structure pile :
+----------------
+Haute adresse
+    [...]
+    [var3]       ← $sp+8
+    [var2]       ← $sp+4
+    [var1]       ← $sp+0  ← $sp
+    [...]
+Basse adresse
+
+1.3. ENVIRONNEMENT LEXICAL
+---------------------------
+
+Structure compiler-env ACTUELLE :
+----------------------------------
+(defstruct compiler-env
+  (variables '())           ; Liste (var . location)
+  (functions '())           ; Table fonctions
+  (label-counter 0)
+  (temp-regs-available '()) ; Pool registres
+  (max-temp-regs 3))
+
+Location peut être :
+- REGISTRE : ex. :$T0
+- PILE : ex. (:stack . 4)  ; offset depuis $sp
+
+Exemple environnement :
+-----------------------
+(let ((x 5) (y 10) (z 20))
+  ...)
+
+Environnement :
+  variables: ((z . (:stack . 8))
+              (y . (:stack . 4))
+              (x . :$T0))
+
+1.4. ALLOCATION REGISTRES/PILE
+-------------------------------
+
+Algorithme allocation :
+-----------------------
+1. Pour chaque binding (var val) dans let :
+   a. Compiler val → résultat dans $v0
+   b. Essayer allouer registre temporaire
+   c. Si registre disponible :
+      - MOVE $v0 → registre
+      - Ajouter (var . registre) à env
+   d. Sinon (pas de registre) :
+      - Calculer offset pile
+      - SW $v0 → $sp+offset
+      - Ajouter (var . (:stack . offset)) à env
+      - Incrémenter compteur pile
+
+2. Compiler body avec nouvel environnement
+
+3. Libérer registres et nettoyer pile
+
+1.5. PORTÉE VARIABLES (SHADOWING)
+----------------------------------
+
+Exemple :
+---------
+(let ((x 1))           ; env1: x→$t0 (val=1)
+  (let ((x 2))         ; env2: x→$t1 (val=2), parent=env1
+    x)                 ; Lookup trouve x→$t1 (val=2)
+  x)                   ; Lookup trouve x→$t0 (val=1)
+
+Implémentation :
+----------------
+- Lookup parcourt variables de gauche à droite
+- Premier match trouvé est retourné
+- Variables internes "shadowed" les externes
+- Quand let termine, environnement parent restauré
+
+================================================================================
+                    2. CONCEPTION DÉTAILLÉE
+================================================================================
+
+2.1. MODIFICATIONS STRUCTURE compiler-env
+------------------------------------------
+
+AJOUTER :
+---------
+(defstruct compiler-env
+  ...
+  (stack-offset 0)      ; NOUVEAU : Offset pile actuel
+  (parent-env nil))     ; NOUVEAU : Environnement parent (pour portée)
+
+Fonctions utilitaires :
+-----------------------
+(defun copy-env (env)
+  "Crée copie environnement pour nouveau scope")
+
+(defun alloc-stack-slot (env)
+  "Alloue slot pile, retourne offset, incrémente compteur")
+
+(defun free-stack-slots (env n)
+  "Libère n slots pile")
+
+2.2. PARSER LISP - AJOUT CLAUSE LET
+------------------------------------
+
+Dans parse-lisp-expr :
+----------------------
+(defun parse-lisp-expr (expr)
+  ...
+  ((and (listp expr) (eq (first expr) 'let))
+   (list :let 
+         (second expr)      ; bindings
+         (cddr expr)))      ; body (multiple exprs)
+  ...)
+
+Exemple :
+---------
+(let ((x 5) (y 10))
+  (+ x y)
+  (* x y))
+
+Parse en :
+----------
+(:let ((x 5) (y 10))       ; bindings
+      ((+ x y) (* x y)))   ; body
+
+2.3. COMPILATION LET - ALGORITHME
+----------------------------------
+
+(defun compile-let (bindings body env)
+  "Compile (let ((var1 val1) ...) body)"
+  
+  ÉTAPE 1 : Créer nouvel environnement
+  -------------------------------------
+  (let ((new-env (copy-env env))
+        (code '())
+        (saved-regs '())
+        (stack-slots 0))
+    
+    ÉTAPE 2 : Compiler chaque binding
+    ----------------------------------
+    (dolist (binding bindings)
+      (let* ((var (first binding))
+             (val (second binding))
+             (val-code (compile-expr val env)))  ; IMPORTANT : env, pas new-env
+        
+        ;; Ajouter code compilation valeur
+        (setf code (append code val-code))
+        
+        ;; Essayer allouer registre
+        (let ((reg (allocate-temp-reg new-env)))
+          (if reg
+              ;; Cas A : Registre disponible
+              (progn
+                (setf code (append code 
+                                  (list (list :MOVE *reg-v0* reg))))
+                (add-variable new-env var reg)
+                (push reg saved-regs))
+              
+              ;; Cas B : Pile
+              (let ((offset (alloc-stack-slot new-env)))
+                (setf code (append code
+                                  (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                                        (list :SW *reg-v0* *reg-sp* 0))))
+                (add-variable new-env var (cons :stack offset))
+                (incf stack-slots))))))
+    
+    ÉTAPE 3 : Compiler body
+    ------------------------
+    (dolist (expr body)
+      (setf code (append code (compile-expr expr new-env))))
+    
+    ÉTAPE 4 : Nettoyer
+    -------------------
+    ;; Libérer registres
+    (dolist (reg (reverse saved-regs))
+      (free-temp-reg new-env reg))
+    
+    ;; Nettoyer pile si nécessaire
+    (when (> stack-slots 0)
+      (setf code (append code
+                        (list (list :ADDI *reg-sp* 
+                                   (* stack-slots 4) 
+                                   *reg-sp*)))))
+    
+    code))
+
+2.4. LOOKUP VARIABLE MODIFIÉ
+-----------------------------
+
+(defun lookup-variable (env var)
+  "Cherche variable dans environnement (avec support pile)"
+  (let ((binding (assoc var (compiler-env-variables env))))
+    (when binding
+      (cdr binding))))
+
+(defun compile-variable (var env)
+  "Compile référence variable (registre ou pile)"
+  (let ((location (lookup-variable env var)))
+    (cond
+      ;; Cas 1 : Variable dans registre
+      ((and location (symbolp location))
+       (list (list :MOVE location *reg-v0*)))
+      
+      ;; Cas 2 : Variable sur pile
+      ((and location (consp location) (eq (car location) :stack))
+       (let ((offset (cdr location)))
+         (list (list :LW *reg-sp* offset *reg-v0*))))
+      
+      ;; Cas 3 : Variable non trouvée
+      (t
+       (error "Variable non définie: ~A" var)))))
+
+================================================================================
+                    3. INSTRUCTIONS VM NÉCESSAIRES
+================================================================================
+
+Instructions EXISTANTES (vérification) :
+----------------------------------------
+✓ SW (Store Word) : SW src base offset
+  → MEM[base+offset] = src
+
+✓ LW (Load Word) : LW base offset dest
+  → dest = MEM[base+offset]
+
+✓ ADDI : ADDI src imm dest
+  → dest = src + imm
+
+✓ MOVE : MOVE src dest
+  → dest = src
+
+TOUTES NÉCESSAIRES DÉJÀ DISPONIBLES ✓
+
+================================================================================
+                    4. EXEMPLES COMPILATION
+================================================================================
+
+EXEMPLE 1 : LET Simple
+----------------------
+Code LISP :
+  (let ((x 5))
+    x)
+
+Compilation :
+  LI 5 $v0              ; Compiler valeur 5
+  MOVE $v0 $t0          ; Allouer x → $t0
+  MOVE $t0 $v0          ; Lire x (body)
+  ; Résultat dans $v0
+
+EXEMPLE 2 : LET Multiple variables
+-----------------------------------
+Code LISP :
+  (let ((x 3) (y 4))
+    (+ x y))
+
+Compilation (cas 2 registres disponibles) :
+  LI 3 $v0              ; x = 3
+  MOVE $v0 $t0          ; x → $t0
+  LI 4 $v0              ; y = 4
+  MOVE $v0 $t1          ; y → $t1
+  MOVE $t0 $v0          ; Charger x
+  MOVE $t1 $t2          ; Charger y dans $t2
+  ADD $v0 $t2 $v0       ; x + y
+  ; Résultat dans $v0
+
+EXEMPLE 3 : LET avec pile (>3 variables)
+-----------------------------------------
+Code LISP :
+  (let ((a 1) (b 2) (c 3) (d 4))
+    (+ a d))
+
+Compilation :
+  LI 1 $v0              ; a = 1
+  MOVE $v0 $t0          ; a → $t0
+  LI 2 $v0              ; b = 2
+  MOVE $v0 $t1          ; b → $t1
+  LI 3 $v0              ; c = 3
+  MOVE $v0 $t2          ; c → $t2
+  LI 4 $v0              ; d = 4
+  ADDI $sp -4 $sp       ; Allouer pile
+  SW $v0 $sp 0          ; d → pile[sp+0]
+  
+  ; Body : (+ a d)
+  MOVE $t0 $v0          ; Charger a (depuis $t0)
+  LW $sp 0 $t3          ; Charger d (depuis pile)
+  ADD $v0 $t3 $v0       ; a + d
+  
+  ADDI $sp 4 $sp        ; Nettoyer pile
+  ; Résultat dans $v0
+
+EXEMPLE 4 : LET imbriqué (shadowing)
+-------------------------------------
+Code LISP :
+  (let ((x 1))
+    (let ((x 2))
+      x))
+
+Compilation :
+  LI 1 $v0              ; x_outer = 1
+  MOVE $v0 $t0          ; x_outer → $t0
+  
+  LI 2 $v0              ; x_inner = 2
+  MOVE $v0 $t1          ; x_inner → $t1
+  MOVE $t1 $v0          ; Lire x_inner (shadowed)
+  
+  ; $t1 libéré, scope inner terminé
+  ; Résultat dans $v0 (= 2)
+
+EXEMPLE 5 : LET avec IF
+------------------------
+Code LISP :
+  (let ((x 10))
+    (if (< x 20)
+        x
+        0))
+
+Compilation :
+  LI 10 $v0             ; x = 10
+  MOVE $v0 $t0          ; x → $t0
+  
+  ; if (< x 20)
+  MOVE $t0 $v0          ; Charger x
+  LI 20 $t1             ; 20 → $t1
+  SLT $v0 $t1 $v0       ; x < 20 ?
+  BEQ $v0 $zero IF_ELSE_0
+  
+  ; then : x
+  MOVE $t0 $v0
+  J IF_END_0
+  
+IF_ELSE_0:
+  ; else : 0
+  LI 0 $v0
+  
+IF_END_0:
+  ; Résultat dans $v0
+
+================================================================================
+                    5. PLAN IMPLÉMENTATION
+================================================================================
+
+ÉTAPE 1 : Modifications environnement (30 min)
+-----------------------------------------------
+✓ Ajouter stack-offset à compiler-env
+✓ Ajouter parent-env à compiler-env
+✓ Implémenter copy-env
+✓ Implémenter alloc-stack-slot
+✓ Implémenter free-stack-slots
+
+ÉTAPE 2 : Parser LET (15 min)
+------------------------------
+✓ Ajouter clause 'let dans parse-lisp-expr
+✓ Retourner (:let bindings body)
+
+ÉTAPE 3 : Compilation LET (1h30)
+---------------------------------
+✓ Implémenter compile-let
+✓ Gérer allocation registres/pile
+✓ Créer nouvel environnement
+✓ Compiler bindings dans ancien env
+✓ Compiler body dans nouvel env
+✓ Nettoyer registres et pile
+
+ÉTAPE 4 : Modifier compile-variable (30 min)
+---------------------------------------------
+✓ Gérer cas pile (:stack . offset)
+✓ Générer LW pour pile
+✓ Générer MOVE pour registre
+
+ÉTAPE 5 : Intégration compile-expr (15 min)
+--------------------------------------------
+✓ Ajouter case :let dans compile-expr
+✓ Appeler compile-let
+
+ÉTAPE 6 : Tests (1h)
+--------------------
+✓ Test simple : (let ((x 5)) x)
+✓ Test multiple : (let ((x 3) (y 4)) (+ x y))
+✓ Test shadowing : (let ((x 1)) (let ((x 2)) x))
+✓ Test imbrication : (let ((x 1)) (let ((y 2)) (+ x y)))
+✓ Test avec if : (let ((x 10)) (if (< x 20) x 0))
+✓ Test avec fonction : (defun test (n) (let ((x (* n 2))) (+ x n)))
+
+TEMPS TOTAL ESTIMÉ : 3h30
+
+================================================================================
+                    6. CRITÈRES DE SUCCÈS
+================================================================================
+
+✓ (let ((x 5)) x) → 5
+✓ (let ((x 3) (y 4)) (+ x y)) → 7
+✓ (let ((x 1)) (let ((x 2)) x)) → 2
+✓ (let ((x 1)) (let ((y 2)) (+ x y))) → 3
+✓ (let ((x 10)) (if (< x 20) x 0)) → 10
+✓ (defun test (n) (let ((x (* n 2))) (+ x n))) (test 5) → 15
+✓ Plus de 3 variables utilise pile correctement
+✓ Pas de regression tests existants
+
+================================================================================
+                    7. RISQUES IDENTIFIÉS
+================================================================================
+
+RISQUE 1 : Confusion env ancien vs nouveau
+-------------------------------------------
+Impact : ★★★★☆
+Solution : Bien documenter, compiler valeurs dans OLD env
+
+RISQUE 2 : Gestion pile incorrecte
+-----------------------------------
+Impact : ★★★★★
+Solution : Tests intensifs, tracer pile manuellement
+
+RISQUE 3 : Shadowing variables cassé
+-------------------------------------
+Impact : ★★★☆☆
+Solution : Tests shadowing explicites
+
+RISQUE 4 : Registres pas libérés
+---------------------------------
+Impact : ★★★☆☆
+Solution : Tracer allocations, vérifier freed
+
+================================================================================
+                    ANALYSE COMPLÉTÉE ✓
+================================================================================
+
+Prochaine action : Commencer implémentation
+Document : PHASE7_LET_IMPLEMENTATION.txt (sera créé)
+
+================================================================================

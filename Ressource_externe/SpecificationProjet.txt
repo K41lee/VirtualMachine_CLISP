@@ -19,3 +19,8 @@ Il faut pouvoir compiler les choses suivantes
     structures de contrôle LISP : let, if, loop, select etc. donc en particulier gérer les paramètres et les variables locales et leur portée
     fonctions locales (labels)
     fermetures
+
+Ajout avancées :
+    compiler la vm avec le compilateur 
+    charger la vm compiler dans la première vm
+    charger fibo(10) dans la seconde vm et vérifier les différences de temps d'exécution.

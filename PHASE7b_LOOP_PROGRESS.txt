@@ -1,0 +1,366 @@
+================================================================================
+                        PHASE 7b - LOOP : RAPPORT DE PROGRESSION
+================================================================================
+
+Date: Session actuelle
+Statut: ⚠ EN COURS - 3/5 tests réussis, 2 problèmes identifiés
+
+================================================================================
+1. IMPLÉMENTATION EFFECTUÉE
+================================================================================
+
+✓ Parser LOOP
+-------------
+- Syntaxe: (loop while condition do body)
+- Validation présence 'while' et 'do'
+- Parse correcte des sous-expressions
+
+✓ compile-loop-while
+--------------------
+- Génération labels LOOP_START et LOOP_END
+- Compilation condition
+- Branchement conditionnel (BEQ)
+- Compilation corps boucle
+- Saut inconditionnel retour (J)
+
+✓ Parser SETQ
+-------------
+- Syntaxe: (setq var value)
+- Support modification variables
+
+✓ compile-setq
+--------------
+- Compilation valeur
+- Assignation registre ou pile
+- Support variables LET
+
+✓ compile-comparison - CORRECTION S2/S3
+----------------------------------------
+AVANT (problématique):
+  - Utilisait directement $T0/$T1
+  - Écrasait variables LET
+
+APRÈS (corrigée):
+  - arg1 sauvegardé sur pile
+  - arg2 stocké dans $S3
+  - arg1 restauré dans $S2
+  - Comparaison SLT $S2 $S3 → $V0
+  - Plus de conflit avec variables dans $T0/$T1
+
+Registres disponibles VM:
+  - Temporaires: T0-T3 (4 seulement)
+  - Saved: S0-S3 (4 registres)
+  - Arguments: A0-A3
+  - Retour: V0
+
+================================================================================
+2. RÉSULTATS TESTS
+================================================================================
+
+TEST 1: LOOP simple compteur ✓ RÉUSSI
+--------------------------------------
+Expression: (let ((x 0))
+              (loop while (< x 5) do (setq x (+ x 1)))
+              x)
+Attendu: 5
+Obtenu: 5
+Statut: ✓ PARFAIT
+
+Code ASM généré (extrait):
+  LI 0 $V0              ; x = 0
+  MOVE $V0 $T0          ; x → $T0
+  LABEL LOOP_START_0
+  MOVE $T0 $V0          ; Charger x
+  ADDI $SP -4 $SP       ; Pile pour arg1
+  SW $V0 $SP 0
+  LI 5 $V0              ; Constante 5
+  MOVE $V0 $S3          ; arg2 → $S3 ✓
+  LW $SP 0 $S2          ; arg1 → $S2 ✓
+  ADDI $SP 4 $SP
+  SLT $S2 $S3 $V0       ; x < 5 ✓
+  ...
+
+Analyse: Une seule variable (x), allocation $T0 OK. Comparaison utilise
+correctement $S2/$S3 sans écraser $T0.
+
+
+TEST 2: LOOP accumulation ✓ RÉUSSI
+-----------------------------------
+Expression: (let ((i 1) (sum 0))
+              (loop while (< i 6) do
+                (setq sum (+ sum i))
+                (setq i (+ i 1)))
+              sum)
+Attendu: 1+2+3+4+5 = 15
+Obtenu: 15
+Statut: ✓ PARFAIT
+
+Analyse: Deux variables (i→$T0, sum→$T1). Comparaison utilise $S2/$S3,
+n'écrase plus les variables. Accumulation correcte.
+
+
+TEST 3: LOOP condition multiple ✓ RÉUSSI
+-----------------------------------------
+Expression: (let ((x 0) (y 0))
+              (loop while (< x 10) do
+                (setq y (+ y x))
+                (setq x (+ x 2)))
+              y)
+Attendu: 0+2+4+6+8 = 20
+Obtenu: 20
+Statut: ✓ PARFAIT
+
+Analyse: Variables x→$T0, y→$T1. Pas de conflit registres.
+Incrémentation par 2 fonctionne.
+
+
+TEST 4: LOOP imbriqué ✗ ÉCHEC - BOUCLE INFINIE
+-----------------------------------------------
+Expression: (let ((i 0) (j 0) (total 0))
+              (loop while (< i 3) do
+                (setq j 0)
+                (loop while (< j 3) do
+                  (setq total (+ total 1))
+                  (setq j (+ j 1)))
+                (setq i (+ i 1)))
+              total)
+Attendu: 3×3 = 9
+Obtenu: 1 (après timeout 1000000 instructions)
+Statut: ✗ BOUCLE INFINIE
+
+Code ASM problématique (extrait boucle interne):
+  ...
+  (MOVE $T2 $V0)              ; Charger total
+  (ADDI $SP -4 $SP)           ; Pile pour (+ total 1)
+  (SW $V0 $SP 0)
+  (LI 1 $V0)
+  (MOVE $V0 $T1)              ; ← ÉCRASE j ! (j était dans $T1)
+  (LW $SP 0 $T0)              ; ← ÉCRASE i ! (i était dans $T0)
+  (ADDI $SP 4 $SP)
+  (ADD $T0 $T1 $V0)
+  (MOVE $V0 $T2)              ; total ← total+1 OK
+  (MOVE $T1 $V0)              ; Charger j (mais j écrasé!)
+  ...
+
+DIAGNOSTIC:
+-----------
+Variables allouées: i→$T0, j→$T1, total→$T2
+Mais compile-arithmetic utilise aussi $T0, $T1 pour calculs temporaires !
+
+Dans (+ total 1):
+  - total → pile (via $V0)
+  - 1 → $T1 (ÉCRASE j!)
+  - Restaure total dans $T0 (ÉCRASE i!)
+  - ADD $T0 $T1 → résultat
+
+PROBLÈME: compile-arithmetic ne tient pas compte des variables déjà
+allouées dans les registres T0-T2. Il les utilise aveuglément comme
+temporaires.
+
+SOLUTION NÉCESSAIRE:
+- Utiliser pile complète pour calculs arithmétiques
+- OU utiliser registres S0, S1 pour temporaires arithmétiques
+- OU analyse liveness registres avant allocation
+
+
+TEST 5: LOOP avec IF ✗ ÉCHEC - ERREUR LABEL
+--------------------------------------------
+Expression: (let ((i 0) (even 0) (odd 0))
+              (loop while (< i 10) do
+                (if (= (mod i 2) 0)
+                  (setq even (+ even 1))
+                  (setq odd (+ odd 1)))
+                (setq i (+ i 1)))
+              even)
+Attendu: 5
+Obtenu: ERREUR
+Statut: ✗ ERREUR RUNTIME
+
+Erreur: >=: EQUAL_4 is not a real number
+
+Code généré (extrait):
+  ...
+  (SUB $S2 $S3 $T2)
+  (BEQ $T2 $ZERO EQUAL_4)     ; ← Label EQUAL_4
+  (LI 0 $V0)
+  (J END_EQ_5)
+  (LABEL EQUAL_6)             ; ← Mais label généré est EQUAL_6 !
+  (LI 1 $V0)
+  (LABEL END_EQ_7)
+  ...
+
+DIAGNOSTIC:
+-----------
+Incohérence génération labels dans compile-comparison pour opérateur =.
+Code génère BEQ vers EQUAL_4 mais définit LABEL EQUAL_6.
+
+gen-label() incrémente compteur à chaque appel:
+  - BEQ génère EQUAL_4 (compteur = 4)
+  - LABEL génère EQUAL_6 (compteur = 6)
+
+PROBLÈME: Entre BEQ et LABEL, d'autres labels sont générés (END_EQ_5),
+causant désynchronisation.
+
+SOLUTION NÉCESSAIRE:
+- Pré-générer tous les labels nécessaires AVANT de construire le code
+- OU modifier gen-label pour ne pas incrémenter si label déjà généré
+
+
+================================================================================
+3. PROBLÈMES IDENTIFIÉS
+================================================================================
+
+PROBLÈME A: Conflit registres compile-arithmetic (TEST 4)
+----------------------------------------------------------
+Sévérité: ★★★★☆ BLOQUANT pour boucles imbriquées
+Impact: Boucles infinies, corruption variables
+
+Description:
+  compile-arithmetic utilise directement $T0, $T1 comme registres
+  temporaires, sans vérifier si des variables y sont stockées.
+
+Affecté:
+  - Boucles imbriquées avec 3+ variables
+  - Expressions arithmétiques complexes dans corps boucle
+
+Solution court terme:
+  Modifier compile-arithmetic pour utiliser pile + S0/S1:
+  ```lisp
+  (defun compile-arithmetic (op args env)
+    (let ((code '()))
+      ;; arg1 sur pile
+      (setf code (append code (compile-expr arg1 env)))
+      (setf code (append code
+                        (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                              (list :SW *reg-v0* *reg-sp* 0))))
+      ;; arg2
+      (setf code (append code (compile-expr arg2 env)))
+      (setf code (append code (list (list :MOVE *reg-v0* *reg-s1*))))
+      ;; Restaurer arg1
+      (setf code (append code
+                        (list (list :LW *reg-sp* 0 *reg-s0*)
+                              (list :ADDI *reg-sp* 4 *reg-sp*))))
+      ;; Opération $S0 op $S1 → $V0
+      (case op
+        (+ (list (list :ADD *reg-s0* *reg-s1* *reg-v0*)))
+        (- (list (list :SUB *reg-s0* *reg-s1* *reg-v0*)))
+        ...)))
+  ```
+
+Solution long terme:
+  - Analyse liveness registres
+  - Allocation intelligente variables (utiliser S0-S3 en priorité)
+  - Descripteur registres global
+
+
+PROBLÈME B: Incohérence labels compile-comparison = (TEST 5)
+-------------------------------------------------------------
+Sévérité: ★★★☆☆ BLOQUANT pour opérateur =
+Impact: Erreur runtime, code incorrect
+
+Description:
+  Dans compile-comparison pour =, le code BEQ référence un label avec
+  compteur N, mais le LABEL est généré avec compteur N+2.
+
+Cause:
+  gen-label incrémente compteur à chaque appel. Entre BEQ et LABEL,
+  d'autres gen-label sont appelés (END_EQ).
+
+Solution:
+  Pré-générer labels au début de compile-comparison:
+  ```lisp
+  (defun compile-comparison (op args env)
+    ...
+    (case op
+      (= (let ((label-equal (gen-label env "EQUAL"))
+               (label-end-eq (gen-label env "END_EQ")))
+           (list (list :SUB *reg-s2* *reg-s3* *reg-t2*)
+                 (list :BEQ *reg-t2* *reg-zero* label-equal)
+                 (list :LI 0 *reg-v0*)
+                 (list :J label-end-eq)
+                 (list :LABEL label-equal)
+                 (list :LI 1 *reg-v0*)
+                 (list :LABEL label-end-eq))))
+      ...))
+  ```
+
+
+================================================================================
+4. MÉTRIQUES
+================================================================================
+
+Tests: 3/5 réussis (60%)
+Temps développement: ~3h
+Lignes code ajoutées: ~120 lignes
+  - compile-loop-while: 30 lignes
+  - compile-setq: 30 lignes
+  - compile-comparison (correction): 40 lignes
+  - Parser: 20 lignes
+
+Performance (tests réussis):
+  - Test 1: < 0.1s
+  - Test 2: < 0.1s
+  - Test 3: < 0.1s
+
+Code généré (test 2):
+  - 44 instructions ASM
+  - 6 itérations boucle
+  - Pas d'optimisation
+
+Registres utilisés:
+  - Variables: T0, T1, T2
+  - Comparaisons: S2, S3
+  - Temporaires arith: T0-T3 (PROBLÈME!)
+
+
+================================================================================
+5. PLAN CORRECTION
+================================================================================
+
+PRIORITÉ 1: Corriger compile-arithmetic (30 min)
+-------------------------------------------------
+Modifier pour utiliser pile + S0/S1 au lieu de T0/T1.
+Permettra test 4 de passer.
+
+PRIORITÉ 2: Corriger labels compile-comparison = (15 min)
+----------------------------------------------------------
+Pré-générer labels au début des cases =, /=.
+Permettra test 5 de passer.
+
+PRIORITÉ 3: Tests validation (15 min)
+--------------------------------------
+Relancer tous tests LOOP.
+Objectif: 5/5 tests réussis.
+
+PRIORITÉ 4: Documentation (30 min)
+-----------------------------------
+Créer PHASE7b_LOOP_COMPLETE.txt
+Mettre à jour todo list
+Préparer Phase 8 (LABELS)
+
+
+================================================================================
+6. CONCLUSION INTERMÉDIAIRE
+================================================================================
+
+✓ ACQUIS Phase 7b:
+------------------
+- Structure LOOP fonctionnelle (parser, compile, labels)
+- SETQ opérationnel
+- Correction majeure compile-comparison (S2/S3)
+- 3 tests sur 5 passent (boucles simples OK)
+
+⚠ RESTE À FAIRE:
+----------------
+- Corriger compile-arithmetic (conflit registres)
+- Corriger génération labels opérateur =
+- Valider 2 tests restants
+
+🎯 OBJECTIF:
+------------
+Phase 7b complète d'ici 1-2h supplémentaires.
+Tests 5/5 réussis.
+Documentation finalisée.
+Prêt pour Phase 8 (LABELS).
+
+================================================================================

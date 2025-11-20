@@ -1,0 +1,669 @@
+================================================================================
+                    PLAN D'ÉVOLUTION DU PROJET
+              Nouveaux Objectifs - 20 novembre 2025
+================================================================================
+
+ÉTAT ACTUEL :
+-------------
+✓ VM MIPS complète (38 registres, 20+ instructions)
+✓ Compilateur LISP → MIPS fonctionnel
+✓ Fonctions récursives (fibonacci, factorial)
+✓ Structure if (conditions)
+✓ Gestion dynamique registres (3 registres + spilling)
+✓ Tests validés (16/16)
+
+OBJECTIFS À ATTEINDRE :
+-----------------------
+Phase 7 : Structures de contrôle avancées (let, loop, select)
+Phase 8 : Fonctions locales (labels)
+Phase 9 : Fermetures (closures)
+Phase 10 : Auto-compilation (bootstrap)
+
+================================================================================
+                            PHASE 7 : LET
+                     Gestion variables locales
+================================================================================
+
+OBJECTIF :
+----------
+Implémenter (let ((var1 val1) (var2 val2) ...) body)
+Gérer portée lexicale et allocation registres/pile
+
+COMPLEXITÉ : ★★☆☆☆ (Moyenne - extension compilation existante)
+
+ÉTAPES :
+
+7.1. ANALYSE THÉORIQUE (30 min)
+--------------------------------
+□ Comprendre sémantique let vs let*
+  - let : Évaluation parallèle (toutes valeurs d'abord)
+  - let* : Évaluation séquentielle (une par une)
+□ Définir représentation bindings en mémoire
+□ Planifier allocation registres/pile
+□ Identifier portée variables
+
+7.2. EXTENSION COMPILATEUR (2-3h)
+----------------------------------
+□ Ajouter clause (let ...) dans compile-expr
+□ Implémenter compile-let :
+  1. Sauvegarder contexte registres actuel
+  2. Compiler chaque valeur d'initialisation
+  3. Allouer registres/pile pour variables
+  4. Compiler body avec nouveau environnement
+  5. Restaurer contexte registres
+□ Gérer environnement lexical :
+  - Créer structure env avec paires (var . registre/offset)
+  - Passer env à compile-expr récursivement
+□ Implémenter résolution variables :
+  - Lookup dans environnement
+  - Générer code chargement (registre ou pile)
+
+7.3. SUPPORT VM (1h)
+--------------------
+□ Vérifier instructions pile suffisantes :
+  - SW (store word) : Sauvegarder sur pile
+  - LW (load word) : Charger depuis pile
+  - ADDI $sp : Ajuster pointeur pile
+□ Tester allocation/désallocation pile
+
+7.4. TESTS (1-2h)
+-----------------
+□ Test simple :
+  (let ((x 5)) x)  → 5
+□ Test multiple variables :
+  (let ((x 3) (y 4)) (+ x y))  → 7
+□ Test portée :
+  (let ((x 1)) (let ((x 2)) x))  → 2 (shadowing)
+□ Test imbrication :
+  (let ((x 1)) (let ((y 2)) (+ x y)))  → 3
+□ Test avec if :
+  (let ((x 10)) (if (< x 20) x 0))  → 10
+□ Test avec fonctions :
+  (defun test (n) (let ((x (* n 2))) (+ x n)))
+  (test 5)  → 15
+
+LIVRABLES :
+-----------
+✓ compile-let dans compiler.lisp
+✓ Gestion environnement lexical
+✓ 6 tests validés dans test-compiler.lisp
+✓ Documentation exemples let dans README.md
+
+================================================================================
+                            PHASE 7b : LOOP
+                      Boucles itératives simples
+================================================================================
+
+OBJECTIF :
+----------
+Implémenter (loop while condition do body)
+Alternative itérative à la récursion
+
+COMPLEXITÉ : ★★☆☆☆ (Moyenne - utilise branches existantes)
+
+ÉTAPES :
+
+7b.1. CONCEPTION (30 min)
+--------------------------
+□ Définir syntaxe loop simplifiée :
+  (loop while <condition> do <body>)
+  ou
+  (loop for <var> from <start> to <end> do <body>)
+□ Identifier instructions nécessaires :
+  - Labels pour début/fin boucle
+  - Branches conditionnelles (BEQ, BNE, etc.)
+  - J (jump inconditionnel)
+
+7b.2. IMPLÉMENTATION (2h)
+--------------------------
+□ Ajouter compile-loop :
+  1. Générer label début boucle (LOOP_START_n)
+  2. Compiler condition
+  3. Branch si faux vers fin (BEQ $t0, $zero, LOOP_END_n)
+  4. Compiler body
+  5. Jump vers début (J LOOP_START_n)
+  6. Label fin boucle (LOOP_END_n)
+□ Gérer compteur loop (for variant) :
+  - Variable locale pour compteur
+  - Incrément automatique
+  - Test fin boucle
+
+7b.3. TESTS (1h)
+----------------
+□ Test while simple :
+  (let ((x 0))
+    (loop while (< x 5) do (setq x (+ x 1)))
+    x)  → 5
+□ Test for :
+  (loop for i from 1 to 10 do ...)
+□ Test imbrication :
+  (loop while ... do (loop while ... do ...))
+
+LIVRABLES :
+-----------
+✓ compile-loop dans compiler.lisp
+✓ 3 tests validés
+✓ Documentation loop
+
+================================================================================
+                         PHASE 8 : LABELS
+                     Fonctions locales lexicales
+================================================================================
+
+OBJECTIF :
+----------
+Implémenter (labels ((fn1 args1 body1) ...) body)
+Fonctions définies localement avec portée lexicale
+
+COMPLEXITÉ : ★★★☆☆ (Moyenne-Haute - nécessite gestion fermetures simples)
+
+ÉTAPES :
+
+8.1. ANALYSE (1h)
+-----------------
+□ Comprendre différence labels vs flet :
+  - labels : Fonctions récursives (peuvent s'appeler)
+  - flet : Fonctions non-récursives
+□ Planifier représentation en mémoire :
+  - Labels comme adresses/pointeurs code
+  - Environnement capturé (si nécessaire)
+□ Identifier résolution appels :
+  - Directs (compile-time) si pas fermeture
+  - Indirects (runtime) si fermeture
+
+8.2. IMPLÉMENTATION SIMPLE (3h)
+--------------------------------
+□ Version sans fermeture d'abord :
+  - Labels = pointeurs vers code MIPS
+  - Environnement : ajouter (fn-name . label-address)
+  - Appel : JAL vers label au lieu de fonction globale
+□ Ajouter compile-labels :
+  1. Générer labels MIPS pour chaque fonction locale
+  2. Compiler corps chaque fonction locale
+  3. Ajouter fonctions à environnement
+  4. Compiler body principal
+
+8.3. GESTION APPELS (2h)
+------------------------
+□ Modifier compile-funcall :
+  - Vérifier si fonction dans environnement local
+  - Si oui : JAL vers label local
+  - Si non : JAL vers fonction globale
+□ Gérer convention appel :
+  - Arguments dans $a0-$a3 ou pile
+  - Résultat dans $v0
+  - Sauvegarder $ra si appels imbriqués
+
+8.4. TESTS (2h)
+---------------
+□ Test simple :
+  (labels ((double (x) (* x 2)))
+    (double 5))  → 10
+□ Test récursif :
+  (labels ((countdown (n)
+             (if (= n 0) 0
+               (countdown (- n 1)))))
+    (countdown 5))  → 0
+□ Test mutuel (si possible) :
+  (labels ((even? (n) (if (= n 0) t (odd? (- n 1))))
+           (odd? (n) (if (= n 0) nil (even? (- n 1)))))
+    (even? 10))  → t
+□ Test avec let :
+  (let ((x 10))
+    (labels ((add-x (n) (+ n x)))
+      (add-x 5)))  → 15
+
+LIVRABLES :
+-----------
+✓ compile-labels dans compiler.lisp
+✓ Gestion environnement fonctions locales
+✓ 4 tests validés
+✓ Documentation labels
+
+================================================================================
+                         PHASE 9 : CLOSURES
+                    Fermetures lexicales complètes
+================================================================================
+
+OBJECTIF :
+----------
+Implémenter fermetures capturant environnement
+Support lambda avec variables libres
+
+COMPLEXITÉ : ★★★★☆ (Haute - allocation tas, pointeurs fonction)
+
+PRÉREQUIS :
+-----------
+⚠ Nécessite allocation dynamique (tas)
+⚠ Nécessite garbage collector basique
+⚠ Architecture mémoire plus complexe
+
+ÉTAPES :
+
+9.1. CONCEPTION ARCHITECTURE (2h)
+----------------------------------
+□ Définir représentation fermeture :
+  Structure en mémoire :
+    [pointeur-code | pointeur-env | taille-env]
+    [var1-capturée | var2-capturée | ...]
+□ Planifier allocation tas :
+  - Zone mémoire dynamique
+  - Allocateur simple (bump allocator)
+  - Garbage collector mark-and-sweep
+□ Définir instructions VM nécessaires :
+  - MALLOC : Allouer mémoire tas
+  - GC : Lancer garbage collection (optionnel)
+
+9.2. EXTENSION VM (4-6h)
+------------------------
+□ Implémenter zone tas :
+  - Mémoire dédiée (ex: 10000-20000)
+  - Pointeur heap-pointer ($hp)
+  - Fonction allocate(size) → address
+□ Implémenter structure fermeture :
+  - Layout standardisé
+  - Fonctions construction/accès
+□ Ajouter instructions :
+  - MALLOC : (setf *hp* (+ *hp* size))
+  - CLOSURE-CALL : Appel avec environnement
+  - LOAD-CAPTURED : Charger variable capturée
+
+9.3. EXTENSION COMPILATEUR (4-6h)
+----------------------------------
+□ Analyse variables libres :
+  - Identifier variables non-locales dans lambda
+  - Calculer variables à capturer
+□ Implémenter compile-lambda :
+  1. Analyser variables libres
+  2. Générer code création fermeture :
+     - Allouer mémoire tas
+     - Copier variables capturées
+     - Stocker pointeur code
+  3. Retourner adresse fermeture dans $v0
+□ Modifier compile-funcall :
+  - Détecter si appel sur fermeture
+  - Charger environnement capturé
+  - Appeler code avec environnement
+
+9.4. GARBAGE COLLECTOR (4-6h - OPTIONNEL)
+------------------------------------------
+□ Implémenter mark-and-sweep :
+  1. Mark : Marquer fermetures accessibles
+  2. Sweep : Libérer fermetures non-marquées
+□ Intégrer déclenchement GC :
+  - Lancer quand tas plein
+  - Compacter mémoire si nécessaire
+
+9.5. TESTS (2-3h)
+-----------------
+□ Test lambda simple :
+  ((lambda (x) (* x 2)) 5)  → 10
+□ Test capture variable :
+  (let ((x 10))
+    ((lambda (y) (+ x y)) 5))  → 15
+□ Test retour fermeture :
+  (defun make-adder (n)
+    (lambda (x) (+ x n)))
+  (let ((add5 (make-adder 5)))
+    (funcall add5 10))  → 15
+□ Test capture multiple :
+  (let ((x 1) (y 2))
+    ((lambda (z) (+ x y z)) 3))  → 6
+□ Test imbrication :
+  (let ((x 1))
+    (let ((f (lambda (y) (+ x y))))
+      (let ((x 10))
+        (funcall f 5))))  → 6 (capture x=1)
+
+LIVRABLES :
+-----------
+✓ Zone tas dans VM
+✓ Instructions MALLOC, CLOSURE-CALL
+✓ compile-lambda avec capture
+✓ 5 tests fermetures validés
+✓ (Optionnel) Garbage collector
+✓ Documentation architecture mémoire
+
+================================================================================
+                      PHASE 10 : AUTO-COMPILATION
+                  Bootstrap : Compiler la VM elle-même
+================================================================================
+
+OBJECTIF :
+----------
+Compiler le compilateur LISP avec lui-même
+Charger dans VM et exécuter pour démontrer complétude
+
+COMPLEXITÉ : ★★★★★ (Très Haute - nécessite toutes phases précédentes)
+
+PRÉREQUIS :
+-----------
+⚠ Toutes phases 7-9 complétées
+⚠ Compilateur support let, loop, labels, closures
+⚠ VM suffisamment performante
+⚠ Tous tests passent
+
+ÉTAPES :
+
+10.1. PRÉPARATION (2h)
+----------------------
+□ Simplifier compilateur si nécessaire :
+  - Version minimale auto-suffisante
+  - Retirer dépendances externes
+  - Code compilateur en LISP pur
+□ Vérifier complétude constructions :
+  - Tous opérateurs utilisés sont compilables
+  - Toutes structures contrôle disponibles
+□ Estimer taille code résultant :
+  - Compilateur ~500 lignes LISP
+  - Code MIPS estimé ~10000-50000 instructions
+
+10.2. COMPILATION PREMIÈRE VM (3-4h)
+------------------------------------
+□ Compiler VM avec compilateur actuel :
+  (compile-lisp '(load "vm.lisp"))
+  → vm-compiled.asm
+□ Tester VM compilée :
+  - Charger dans VM interprétée (VM₀)
+  - Exécuter code simple
+  - Valider résultats identiques
+
+10.3. COMPILATION COMPILATEUR (4-6h)
+------------------------------------
+□ Compiler compilateur avec lui-même :
+  Version 0 (interprétée) compile Version 1 (compilée)
+  (compile-lisp '(load "compiler.lisp"))
+  → compiler-compiled.asm
+□ Charger compilateur compilé dans VM :
+  VM₀ charge compiler-compiled.asm
+□ Tester compilation avec compilateur compilé :
+  Dans VM₀, exécuter compiler compilé pour compiler fibo
+  Comparer résultats avec compilation directe
+
+10.4. BOOTSTRAP COMPLET (2-3h)
+------------------------------
+□ Chaîne complète :
+  1. VM₀ (interprétée, Common LISP)
+  2. Charger VM₁ (compilée MIPS) dans VM₀
+  3. Dans VM₁, charger compiler₁ (compilé MIPS)
+  4. Avec compiler₁, compiler fibo
+  5. Exécuter fibo dans VM₁
+□ Mesurer performance :
+  - VM₀ interprétant fibo natif
+  - VM₀ interprétant fibo compilé
+  - VM₁ (dans VM₀) exécutant fibo
+  - Comparer temps exécution
+
+10.5. VALIDATION (2h)
+---------------------
+□ Test bootstrap :
+  Compiler compilateur n fois, vérifier stabilité
+  compiler₀ → compiler₁ → compiler₂
+  compiler₁ = compiler₂ ? (point fixe)
+□ Test fonctionnel :
+  Tous tests doivent passer sur VM compilée
+□ Analyse performance :
+  Overhead VM₁ dans VM₀
+  Ratio temps exécution
+
+10.6. DÉMONSTRATION (1h)
+------------------------
+□ Script automatique :
+  - Charge VM₀
+  - Compile et charge VM₁
+  - Compile et charge compiler₁
+  - Compile fibo avec compiler₁
+  - Exécute fibo(20) dans VM₁
+  - Affiche résultat et temps
+□ Documentation complète :
+  - Schéma architecture multi-niveaux
+  - Analyse performance détaillée
+  - Explications bootstrap
+
+LIVRABLES :
+-----------
+✓ VM compilée (vm-compiled.asm)
+✓ Compilateur compilé (compiler-compiled.asm)
+✓ Script démo bootstrap
+✓ Tests validation complète
+✓ Documentation architecture multi-niveaux
+✓ Analyse performance 3 niveaux
+✓ Rapport technique bootstrap
+
+================================================================================
+                        RÉSUMÉ PLAN D'ACTION
+================================================================================
+
+PHASE 7 : LET + LOOP (1-2 semaines)
+------------------------------------
+Effort : ~10-15 heures
+Difficulté : ★★☆☆☆
+Prérequis : Compilation existante
+Livrables :
+  - compile-let, compile-loop
+  - 9 tests validés
+  - Documentation
+
+PHASE 8 : LABELS (1 semaine)
+-----------------------------
+Effort : ~8-10 heures
+Difficulté : ★★★☆☆
+Prérequis : Phase 7 complétée
+Livrables :
+  - compile-labels
+  - Appels fonctions locales
+  - 4 tests validés
+
+PHASE 9 : CLOSURES (2-3 semaines)
+----------------------------------
+Effort : ~20-30 heures
+Difficulté : ★★★★☆
+Prérequis : Phase 8 complétée
+Livrables :
+  - Allocation tas
+  - compile-lambda avec capture
+  - (Optionnel) Garbage collector
+  - 5 tests fermetures
+  - Documentation architecture
+
+PHASE 10 : AUTO-COMPILATION (1-2 semaines)
+-------------------------------------------
+Effort : ~15-20 heures
+Difficulté : ★★★★★
+Prérequis : Phases 7-9 complétées
+Livrables :
+  - VM compilée
+  - Compilateur compilé
+  - Bootstrap démontré
+  - Analyse performance complète
+
+TOTAL ESTIMÉ :
+--------------
+Temps : 6-8 semaines (à temps partiel)
+Effort : 50-75 heures
+Difficulté : Progressive (★★ → ★★★★★)
+
+================================================================================
+                        ORDRE RECOMMANDÉ
+================================================================================
+
+APPROCHE INCRÉMENTALE :
+-----------------------
+
+Semaine 1-2 : PHASE 7a (LET)
+  → Fondation variables locales
+  → Environnement lexical
+
+Semaine 2-3 : PHASE 7b (LOOP)
+  → Alternative récursion
+  → Structures contrôle complètes
+
+Semaine 3-4 : PHASE 8 (LABELS)
+  → Fonctions locales
+  → Préparation fermetures
+
+Semaine 4-6 : PHASE 9 (CLOSURES)
+  → Allocation tas
+  → Capture variables
+  → Architecture mémoire avancée
+
+Semaine 7-8 : PHASE 10 (BOOTSTRAP)
+  → Auto-compilation
+  → Validation complétude
+  → Démonstration finale
+
+JALONS :
+--------
+✓ Jalon 1 (Semaine 2) : Let fonctionnel
+✓ Jalon 2 (Semaine 3) : Loop fonctionnel
+✓ Jalon 3 (Semaine 4) : Labels fonctionnel
+✓ Jalon 4 (Semaine 6) : Closures fonctionnelles
+✓ Jalon 5 (Semaine 8) : Bootstrap démontré
+
+================================================================================
+                        RISQUES ET MITIGATION
+================================================================================
+
+RISQUE 1 : Gestion mémoire complexe (Phase 9)
+----------------------------------------------
+Impact : ★★★★☆
+Probabilité : ★★★☆☆
+Mitigation :
+  - Commencer avec allocateur simple (bump allocator)
+  - Reporter GC à version ultérieure
+  - Limiter taille programmes tests
+
+RISQUE 2 : Performance insuffisante (Phase 10)
+-----------------------------------------------
+Impact : ★★★☆☆
+Probabilité : ★★★★☆
+Mitigation :
+  - Optimiser parties critiques VM
+  - Utiliser code natif pour I/O
+  - Accepter overhead important (démo concept)
+
+RISQUE 3 : Bugs compilation complexes (Phase 10)
+-------------------------------------------------
+Impact : ★★★★★
+Probabilité : ★★★☆☆
+Mitigation :
+  - Tests unitaires exhaustifs chaque phase
+  - Validation incrémentale
+  - Logging détaillé compilation
+
+RISQUE 4 : Dépassement temps estimé
+------------------------------------
+Impact : ★★☆☆☆
+Probabilité : ★★★★☆
+Mitigation :
+  - Phases optionnelles clairement identifiées
+  - Phase 10 = bonus (pas critique)
+  - Scope réductible si nécessaire
+
+================================================================================
+                        CRITÈRES DE SUCCÈS
+================================================================================
+
+PHASE 7 (LET/LOOP) :
+--------------------
+✓ (let ((x 5) (y 10)) (+ x y)) → 15
+✓ (loop while (< i 10) do ...) fonctionne
+✓ Tests portée variables passent
+✓ Performance acceptable
+
+PHASE 8 (LABELS) :
+------------------
+✓ Fonctions locales récursives fonctionnent
+✓ Appels mutuels possibles
+✓ Imbrication let + labels OK
+✓ Tests passent
+
+PHASE 9 (CLOSURES) :
+--------------------
+✓ Lambda avec capture variables libres
+✓ Retour fermeture depuis fonction
+✓ Fermetures imbriquées fonctionnent
+✓ Pas de fuites mémoire (ou GC gère)
+✓ Tests complexes passent
+
+PHASE 10 (BOOTSTRAP) :
+----------------------
+✓ Compilateur compile lui-même
+✓ Code généré identique (point fixe)
+✓ VM₁ dans VM₀ fonctionne
+✓ fibo(20) donne 6765 sur VM compilée
+✓ Temps exécution mesuré et documenté
+✓ Architecture multi-niveaux démontrée
+
+================================================================================
+                        ALTERNATIVES SIMPLIFIÉES
+================================================================================
+
+Si contraintes temps/complexité :
+
+ALTERNATIVE 1 : Ignorer CLOSURES
+---------------------------------
+  - Phases 7, 8 seulement
+  - Let + Loop + Labels
+  - Pas allocation tas
+  - Fonctionnel mais incomplet
+
+ALTERNATIVE 2 : Ignorer BOOTSTRAP
+----------------------------------
+  - Phases 7, 8, 9
+  - Système complet
+  - Pas auto-compilation
+  - Démonstration théorique bootstrap
+
+ALTERNATIVE 3 : Bootstrap partiel
+----------------------------------
+  - Compiler VM seulement (pas compilateur)
+  - VM₁ dans VM₀
+  - Moins impressionnant mais fonctionnel
+
+================================================================================
+                        RESSOURCES NÉCESSAIRES
+================================================================================
+
+DOCUMENTATION :
+---------------
+- Spécification Common LISP (CLHS)
+- Architecture MIPS (référence actuelle)
+- Littérature closures et fermetures
+- Exemples bootstrap (Scheme, autres)
+
+OUTILS :
+--------
+- Debugger amélioré (tracer fermetures)
+- Profileur performance
+- Tests automatisés étendus
+- Visualisation mémoire (tas, pile)
+
+CONNAISSANCES :
+---------------
+- Environnements lexicaux
+- Allocation mémoire dynamique
+- Garbage collection basique
+- Compilation incrémentale
+- Bootstrap compilers
+
+================================================================================
+                    PLAN VALIDÉ ET PRÊT ✓✓✓
+================================================================================
+
+Ce plan fournit :
+✓ Décomposition claire en 4 phases majeures
+✓ Estimations temps réalistes
+✓ Ordre d'implémentation optimal
+✓ Critères succès mesurables
+✓ Gestion risques identifiée
+✓ Alternatives si contraintes
+✓ Jalons intermédiaires
+
+Prochaine action :
+→ Commencer Phase 7a (LET)
+→ Créer branche git "feature/let"
+→ Implémenter compile-let
+→ Valider tests
+
+================================================================================

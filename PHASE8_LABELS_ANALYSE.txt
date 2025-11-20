@@ -1,0 +1,814 @@
+================================================================================
+                    PHASE 8 - LABELS : ANALYSE THÉORIQUE
+================================================================================
+
+Date: 20 novembre 2025
+Statut: Analyse en cours
+Durée estimée: 30-45 min
+
+================================================================================
+1. OBJECTIF
+================================================================================
+
+Implémenter la forme spéciale LABELS pour définir des fonctions locales avec
+portée lexicale, similaires aux variables LET mais pour les fonctions.
+
+Syntaxe Common Lisp:
+```lisp
+(labels ((fn1 (arg1 arg2 ...) body1)
+         (fn2 (arg1 arg2 ...) body2)
+         ...)
+  body-principal)
+```
+
+Exemple simple:
+```lisp
+(labels ((double (x) (* x 2))
+         (triple (x) (* x 3)))
+  (+ (double 5) (triple 3)))
+; → 10 + 9 = 19
+```
+
+Exemple récursif:
+```lisp
+(labels ((fact (n)
+           (if (<= n 1)
+             1
+             (* n (fact (- n 1))))))
+  (fact 5))
+; → 120
+```
+
+Exemple récursion mutuelle:
+```lisp
+(labels ((even? (n)
+           (if (= n 0)
+             1
+             (odd? (- n 1))))
+         (odd? (n)
+           (if (= n 0)
+             0
+             (even? (- n 1)))))
+  (even? 10))
+; → 1 (vrai)
+```
+
+
+================================================================================
+2. SÉMANTIQUE LABELS vs AUTRES FORMES
+================================================================================
+
+2.1. LABELS vs DEFUN
+---------------------
+DEFUN (global):
+  - Définit fonction globale
+  - Portée illimitée (tout le programme)
+  - Nom accessible partout après définition
+  - Pas de capture environnement (sauf closures)
+
+LABELS (local):
+  - Définit fonctions locales
+  - Portée limitée au corps du labels
+  - Noms seulement dans le bloc
+  - Peut capturer variables environnement englobant
+
+Exemple:
+```lisp
+(defun global-fn (x) (* x 2))  ; Globale
+
+(labels ((local-fn (x) (* x 2)))  ; Locale
+  (local-fn 5))                   ; OK ici
+
+(local-fn 5)  ; ← ERREUR: local-fn non définie
+```
+
+2.2. LABELS vs LET
+------------------
+LET (variables):
+  - (let ((var val) ...) body)
+  - Lie variables à valeurs
+  - Portée lexicale
+  - Variables accessibles dans body
+
+LABELS (fonctions):
+  - (labels ((fn args body) ...) body)
+  - Lie noms fonctions à définitions
+  - Portée lexicale
+  - Fonctions accessibles dans body ET dans leurs propres définitions
+
+Différence clé - Récursion:
+```lisp
+;; LET: Variables NON accessibles dans leurs propres initialisations
+(let ((x 10)
+      (y (+ x 1)))  ; ← ERREUR: x pas encore défini
+  y)
+
+;; LABELS: Fonctions accessibles dans leurs propres corps (récursion)
+(labels ((fact (n)
+           (if (<= n 1) 1 (* n (fact (- n 1))))))  ; ← OK: fact accessible
+  (fact 5))
+```
+
+2.3. LABELS vs FLET
+-------------------
+FLET (Common Lisp):
+  - Fonctions locales NON récursives
+  - Fonctions pas accessibles dans leurs propres définitions
+  - Évaluation parallèle (comme LET)
+
+LABELS:
+  - Fonctions locales récursives
+  - Fonctions accessibles dans toutes les définitions
+  - Évaluation séquentielle (comme LET*)
+
+Exemple différence:
+```lisp
+;; FLET: Pas de récursion
+(flet ((fact (n) (* n (fact (- n 1)))))  ; ← ERREUR: fact pas accessible
+  (fact 5))
+
+;; LABELS: Récursion OK
+(labels ((fact (n)
+           (if (<= n 1) 1 (* n (fact (- n 1))))))  ; ← OK
+  (fact 5))
+```
+
+Note: Nous implémenterons seulement LABELS (pas FLET) car c'est la forme
+la plus puissante et la plus utile.
+
+
+================================================================================
+3. PORTÉE LEXICALE DÉTAILLÉE
+================================================================================
+
+3.1. Portée des fonctions LABELS
+---------------------------------
+Règles:
+  1. Fonctions définies dans LABELS accessibles dans tout le corps principal
+  2. Fonctions accessibles dans leurs propres corps (récursion)
+  3. Fonctions accessibles dans les corps des autres fonctions (récursion mutuelle)
+  4. Fonctions PAS accessibles hors du bloc LABELS
+
+Exemple:
+```lisp
+(labels ((fn1 (x)
+           (if (= x 0)
+             0
+             (fn2 (- x 1))))    ; fn1 appelle fn2 ✓
+         (fn2 (x)
+           (if (= x 0)
+             0
+             (fn1 (- x 1)))))   ; fn2 appelle fn1 ✓
+  (fn1 10))                     ; Corps appelle fn1 ✓
+
+(fn1 5)  ; ← ERREUR: fn1 hors portée
+```
+
+3.2. Interaction avec environnement englobant
+----------------------------------------------
+Fonctions LABELS peuvent accéder:
+  - Variables LET englobantes
+  - Fonctions LABELS englobantes (imbrication)
+  - Fonctions globales DEFUN
+  - Paramètres de fonction englobante
+
+Exemple:
+```lisp
+(let ((multiplier 10))               ; Variable LET
+  (labels ((scale (x)                ; Fonction LABELS
+             (* x multiplier)))      ; Accède à multiplier ✓
+    (scale 5)))
+; → 50
+```
+
+3.3. Imbrication LABELS
+-----------------------
+LABELS peut être imbriqué:
+```lisp
+(labels ((outer (x)
+           (labels ((inner (y)
+                      (+ x y)))      ; inner accède à x (param outer)
+             (inner (* x 2)))))
+  (outer 5))
+; → 5 + 10 = 15
+```
+
+3.4. Shadowing fonctions
+------------------------
+Fonction locale peut masquer fonction globale:
+```lisp
+(defun foo (x) (* x 2))              ; Globale
+
+(labels ((foo (x) (+ x 10)))         ; Locale masque globale
+  (foo 5))
+; → 15 (pas 10)
+
+(foo 5)  ; → 10 (globale toujours accessible hors labels)
+```
+
+
+================================================================================
+4. RÉCURSION ET RÉCURSION MUTUELLE
+================================================================================
+
+4.1. Récursion simple
+---------------------
+Fonction s'appelle elle-même:
+```lisp
+(labels ((fact (n)
+           (if (<= n 1)
+             1
+             (* n (fact (- n 1))))))  ; Récursion
+  (fact 5))
+```
+
+Graphe appels:
+  fact(5) → fact(4) → fact(3) → fact(2) → fact(1) → 1
+         ← 5*24   ← 4*6    ← 3*2    ← 2*1    ← 1
+
+Traduction ASM (schématique):
+```
+LABEL FACT
+  ; Si n <= 1, retourner 1
+  BLE $a0 1 BASE_CASE
+  ; Sinon: sauvegarder n, appeler fact(n-1), multiplier
+  ADDI $sp -4 $sp
+  SW $a0 $sp 0         ; Sauvegarder n
+  ADDI $a0 -1 $a0      ; n-1
+  JAL FACT             ; Récursion
+  LW $sp 0 $t0         ; Restaurer n
+  MUL $t0 $v0          ; n * fact(n-1)
+  MFLO $v0
+  ADDI $sp 4 $sp
+  JR $ra
+LABEL BASE_CASE
+  LI 1 $v0
+  JR $ra
+```
+
+4.2. Récursion mutuelle
+-----------------------
+Deux ou plusieurs fonctions s'appellent mutuellement:
+```lisp
+(labels ((even? (n)
+           (if (= n 0)
+             1
+             (odd? (- n 1))))      ; even? appelle odd?
+         (odd? (n)
+           (if (= n 0)
+             0
+             (even? (- n 1)))))    ; odd? appelle even?
+  (even? 10))
+```
+
+Graphe appels:
+  even?(10) → odd?(9) → even?(8) → ... → even?(0) → 1
+           ← 1        ← 1        ← ...  ← 1
+
+Défi compilation:
+  - Quand on compile even?, odd? pas encore définie
+  - Solution: Pré-déclarer tous les labels ASM AVANT compilation corps
+
+
+4.3. Comparaison avec DEFUN récursif existant
+----------------------------------------------
+Actuellement, DEFUN récursif fonctionne:
+```lisp
+(defun fib (n)
+  (if (< n 2)
+    n
+    (+ (fib (- n 1)) (fib (- n 2)))))
+```
+
+Comment ça marche:
+  - DEFUN ajoute fonction à environnement global
+  - Lors de compilation corps, fonction déjà dans environnement
+  - Appel récursif → lookup trouve fonction → génère JAL vers label
+
+LABELS similaire mais:
+  - Environnement LOCAL pas global
+  - Plusieurs fonctions simultanées
+  - Imbrication possible
+
+
+================================================================================
+5. REPRÉSENTATION EN MÉMOIRE
+================================================================================
+
+5.1. Structure environnement
+-----------------------------
+Actuellement (Phase 7):
+```lisp
+(defstruct compiler-env
+  (variables '())        ; Liste (symbol . location)
+  (functions '())        ; Liste (symbol . label)
+  (label-counter 0)
+  (temp-regs '($T0 $T1 $T2))
+  (stack-offset 0)
+  (parent-env nil))
+```
+
+Extension pour LABELS:
+  - Pas de changement structure nécessaire!
+  - functions contient déjà (symbol . label)
+  - Il suffit d'ajouter fonctions locales à cet alist
+  - parent-env permet recherche dans environnements englobants
+
+5.2. Gestion labels ASM
+------------------------
+Problème:
+  - Chaque fonction LABELS a besoin d'un label ASM unique
+  - Labels doivent être uniques globalement (pas de collision)
+
+Solution:
+  Utiliser gen-label existant avec préfixe nom fonction:
+  ```lisp
+  (labels ((fact (n) ...))
+    ...)
+  
+  ; Génère:
+  LABEL FACT_0  ; ou LOCAL_FACT_0 pour éviter collision avec DEFUN
+  ```
+
+5.3. Allocation registres paramètres
+-------------------------------------
+Paramètres fonctions LABELS:
+  - Option 1: Utiliser registres arguments A0-A3 (comme DEFUN)
+  - Option 2: Utiliser pile uniquement
+  - Option 3: Hybride (petits = registres, débordement = pile)
+
+Recommandation: Option 1 (A0-A3)
+  - Cohérent avec DEFUN existant
+  - Performance meilleure
+  - Simplifie code
+
+
+================================================================================
+6. STRATÉGIE DE COMPILATION
+================================================================================
+
+6.1. Étapes compilation LABELS
+-------------------------------
+```lisp
+(labels ((fn1 (args1) body1)
+         (fn2 (args2) body2))
+  body-principal)
+```
+
+Étape 1: Créer nouvel environnement
+  - Copier environnement actuel (copy-env)
+  - Ajouter toutes les fonctions labels à cet environnement
+
+Étape 2: Pré-générer tous les labels ASM
+  - Pour chaque fonction, générer label unique
+  - Associer (nom-fonction . label-asm) dans environnement
+
+Étape 3: Compiler chaque fonction
+  - Pour chaque (nom args body):
+    * Générer LABEL
+    * Compiler body dans environnement avec fonctions disponibles
+    * Générer JR $ra (retour)
+
+Étape 4: Compiler corps principal
+  - Compiler body-principal dans environnement avec fonctions
+
+Étape 5: Pas de nettoyage nécessaire
+  - Labels ASM persistent
+  - Environnement local jeté après bloc
+
+
+6.2. Pseudocode compile-labels
+-------------------------------
+```lisp
+(defun compile-labels (definitions body env)
+  (let ((new-env (copy-env env))
+        (code '())
+        (fn-labels '()))
+    
+    ;; Étape 1 & 2: Pré-générer labels et ajouter à environnement
+    (dolist (def definitions)
+      (let* ((fn-name (first def))
+             (fn-label (gen-label new-env (format nil "LOCAL_~A" fn-name))))
+        (push (cons fn-name fn-label) fn-labels)
+        (add-function new-env fn-name fn-label)))
+    
+    ;; Étape 3: Compiler chaque fonction
+    (dolist (def definitions)
+      (let* ((fn-name (first def))
+             (fn-args (second def))
+             (fn-body (cddr def))
+             (fn-label (cdr (assoc fn-name fn-labels))))
+        
+        ;; Label fonction
+        (setf code (append code (list (list :LABEL fn-label))))
+        
+        ;; TODO: Gérer paramètres (A0-A3)
+        
+        ;; Compiler corps fonction
+        (dolist (expr fn-body)
+          (setf code (append code (compile-expr expr new-env))))
+        
+        ;; Retour
+        (setf code (append code (list (list :JR *reg-ra*))))))
+    
+    ;; Étape 4: Compiler corps principal
+    (dolist (expr body)
+      (setf code (append code (compile-expr expr new-env))))
+    
+    code))
+```
+
+
+6.3. Compilation appels fonctions locales
+------------------------------------------
+Lors de (fn arg1 arg2):
+  1. Lookup fn dans environnement
+  2. Si trouvée → fonction locale ou globale
+  3. Compiler arguments → A0, A1, A2, A3
+  4. Générer JAL vers label fonction
+  5. Résultat dans V0
+
+Code similaire à appels DEFUN existants, juste lookup environnement local
+en premier.
+
+
+================================================================================
+7. GESTION PARAMÈTRES
+================================================================================
+
+7.1. Passage paramètres
+------------------------
+Convention d'appel (identique DEFUN):
+  - Arguments 1-4: A0, A1, A2, A3
+  - Arguments 5+: Pile (si nécessaire futur)
+  - Résultat: V0
+  - Adresse retour: RA
+
+7.2. Mapping paramètres → variables
+------------------------------------
+Dans corps fonction LABELS:
+```lisp
+(labels ((add3 (a b c)
+           (+ (+ a b) c)))
+  (add3 1 2 3))
+```
+
+Corps add3:
+  - a → A0
+  - b → A1
+  - c → A2
+
+Compilation:
+  - Créer environnement local fonction
+  - Ajouter (a . A0), (b . A1), (c . A2) à variables
+  - Compiler corps avec cet environnement
+
+7.3. Sauvegarde/restauration registres
+---------------------------------------
+Si fonction utilise registres temporaires ou saved:
+  - Sauvegarder au début (ADDI $sp, SW)
+  - Restaurer avant retour (LW, ADDI $sp)
+
+Registres à sauvegarder:
+  - S0-S3 si utilisés (convention saved)
+  - T0-T2 si nécessaires (mais pas obligation, temporaires)
+
+
+================================================================================
+8. DÉFIS TECHNIQUES
+================================================================================
+
+8.1. Ordre compilation
+-----------------------
+Problème: Récursion mutuelle
+```lisp
+(labels ((f1 (x) ... (f2 ...) ...)
+         (f2 (x) ... (f1 ...) ...))
+  ...)
+```
+
+Quand on compile f1, f2 pas encore compilée.
+
+Solution: Pré-déclaration
+  - Ajouter TOUTES les fonctions à environnement AVANT compilation
+  - Chaque fonction "voit" les autres dans environnement
+  - Labels ASM déjà générés
+
+8.2. Collision noms
+-------------------
+Problème: Fonction locale même nom que globale
+```lisp
+(defun foo (x) (* x 2))
+
+(labels ((foo (x) (+ x 10)))
+  (foo 5))
+```
+
+Solution: Préfixe labels ASM
+  - DEFUN foo → LABEL FOO
+  - LABELS foo → LABEL LOCAL_FOO_0
+  - Lookup environnement en priorité (local avant global)
+
+8.3. Imbrication
+----------------
+Problème: LABELS dans LABELS
+```lisp
+(labels ((outer (x)
+           (labels ((inner (y)
+                      ...))
+             (inner x))))
+  (outer 5))
+```
+
+Solution: Environnements chaînés
+  - parent-env déjà implémenté
+  - inner a accès à outer via parent-env
+  - Lookup récursif fonctionne
+
+8.4. Interaction LET
+--------------------
+Problème: LABELS dans LET, ou inverse
+```lisp
+(let ((x 10))
+  (labels ((double () (* x 2)))
+    (double)))
+```
+
+Solution: Environnement unifié
+  - Variables et fonctions dans même environnement
+  - Fonctions accèdent aux variables via lookup normal
+  - Déjà supporté par architecture existante
+
+
+================================================================================
+9. EXEMPLES TEST PRÉVUS
+================================================================================
+
+Test 1: LABELS simple non récursif
+-----------------------------------
+```lisp
+(labels ((double (x) (* x 2)))
+  (double 5))
+; Attendu: 10
+```
+
+Test 2: LABELS récursif simple
+-------------------------------
+```lisp
+(labels ((fact (n)
+           (if (<= n 1)
+             1
+             (* n (fact (- n 1))))))
+  (fact 5))
+; Attendu: 120
+```
+
+Test 3: Récursion mutuelle
+---------------------------
+```lisp
+(labels ((even? (n)
+           (if (= n 0) 1 (odd? (- n 1))))
+         (odd? (n)
+           (if (= n 0) 0 (even? (- n 1)))))
+  (even? 10))
+; Attendu: 1
+```
+
+Test 4: LABELS avec LET
+------------------------
+```lisp
+(let ((x 10))
+  (labels ((add-x (y) (+ x y)))
+    (add-x 5)))
+; Attendu: 15
+```
+
+Test 5: Plusieurs fonctions
+----------------------------
+```lisp
+(labels ((double (x) (* x 2))
+         (triple (x) (* x 3))
+         (sum-both (x) (+ (double x) (triple x))))
+  (sum-both 4))
+; Attendu: 8 + 12 = 20
+```
+
+Test 6: Imbrication LABELS
+---------------------------
+```lisp
+(labels ((outer (x)
+           (labels ((inner (y)
+                      (* x y)))
+             (inner 3))))
+  (outer 5))
+; Attendu: 15
+```
+
+
+================================================================================
+10. PLAN D'IMPLÉMENTATION
+================================================================================
+
+10.1. Étape 1: Parser LABELS (15 min)
+--------------------------------------
+Ajouter clause dans parse-expr:
+```lisp
+(labels
+ (if (and (>= (length args) 2)
+          (listp (first args)))
+     (list :labels (first args) (rest args))
+     (error "Syntaxe LABELS incorrecte: ~A" expr)))
+```
+
+10.2. Étape 2: Fonction auxiliaire add-function (15 min)
+---------------------------------------------------------
+Si pas déjà existante, créer:
+```lisp
+(defun add-function (env fn-name fn-label)
+  "Ajoute une fonction à l'environnement"
+  (push (cons fn-name fn-label) (compiler-env-functions env)))
+```
+
+10.3. Étape 3: compile-labels squelette (30 min)
+-------------------------------------------------
+Implémenter structure de base:
+  - Créer nouvel environnement
+  - Pré-générer labels
+  - Ajouter fonctions à environnement
+  - Compiler corps principal
+
+10.4. Étape 4: Compilation fonctions (1h)
+------------------------------------------
+Pour chaque fonction:
+  - Générer LABEL
+  - Créer environnement avec paramètres
+  - Compiler corps
+  - Générer JR $ra
+
+10.5. Étape 5: Gestion paramètres (45 min)
+-------------------------------------------
+  - Mapper args → A0-A3
+  - Ajouter à environnement fonction
+  - Valider limitation 4 paramètres
+
+10.6. Étape 6: Modification compile-funcall (30 min)
+-----------------------------------------------------
+Adapter pour appels locaux:
+  - Lookup dans environnement local d'abord
+  - Si trouvé → JAL vers label local
+  - Sinon → JAL vers label global
+
+10.7. Étape 7: Tests (1h30)
+----------------------------
+  - Créer test-labels.lisp
+  - 6 tests progressifs
+  - Validation chaque cas
+  - Debug si nécessaire
+
+Total estimé: 4h30 - 5h30
+
+
+================================================================================
+11. DIFFÉRENCES AVEC CLOSURES (PHASE 9)
+================================================================================
+
+LABELS (Phase 8):
+  - Fonctions locales avec portée lexicale
+  - Peuvent accéder variables environnement MAIS pas les capturer
+  - Pas de retour fonction (fonction locale meurt avec bloc)
+  - Pas d'allocation tas
+  - Compilation temps compilation
+
+CLOSURES (Phase 9):
+  - Fonctions peuvent être retournées et survivre au bloc
+  - Capturent environnement (variables copiées)
+  - Nécessitent allocation tas pour environnement
+  - Structure runtime: (code-pointer . env-pointer)
+  - Plus complexe
+
+Exemple différence:
+```lisp
+;; LABELS: Fonctionne seulement dans bloc
+(labels ((foo (x) (+ x 1)))
+  (foo 5))  ; OK ici
+; foo n'existe plus ici
+
+;; CLOSURES: Peut être retourné
+(defun make-adder (n)
+  (lambda (x) (+ x n)))  ; Lambda capture n
+(let ((add5 (make-adder 5)))
+  (funcall add5 10))  ; → 15
+; add5 survit, environnement préservé
+```
+
+Pour Phase 8, on ne gère PAS:
+  - Lambda expressions
+  - Retour de fonctions
+  - Capture environnement
+  - Allocation tas
+
+On gère seulement:
+  - Définition fonctions locales
+  - Appels dans même bloc
+  - Récursion (simple et mutuelle)
+  - Accès variables environnement (lecture seule)
+
+
+================================================================================
+12. ARCHITECTURE CODE ASM GÉNÉRÉ
+================================================================================
+
+Exemple complet:
+```lisp
+(labels ((double (x) (* x 2))
+         (triple (x) (* x 3)))
+  (+ (double 5) (triple 4)))
+```
+
+Code ASM généré:
+```
+; Saut par-dessus définitions fonctions
+JMP LABELS_BODY_0
+
+; Fonction double
+LABEL LOCAL_DOUBLE_1
+  ; x dans $A0
+  MOVE $A0 $T0
+  LI 2 $T1
+  MUL $T0 $T1
+  MFLO $V0
+  JR $RA
+
+; Fonction triple
+LABEL LOCAL_TRIPLE_2
+  ; x dans $A0
+  MOVE $A0 $T0
+  LI 3 $T1
+  MUL $T0 $T1
+  MFLO $V0
+  JR $RA
+
+; Corps principal
+LABEL LABELS_BODY_0
+  ; (double 5)
+  LI 5 $A0
+  ADDI $SP -4 $SP
+  SW $RA $SP 0        ; Sauvegarder RA
+  JAL LOCAL_DOUBLE_1
+  LW $SP 0 $RA        ; Restaurer RA
+  ADDI $SP 4 $SP
+  MOVE $V0 $T0        ; Résultat double dans $T0
+  
+  ; (triple 4)
+  LI 4 $A0
+  ADDI $SP -4 $SP
+  SW $RA $SP 0
+  JAL LOCAL_TRIPLE_2
+  LW $SP 0 $RA
+  ADDI $SP 4 $SP
+  MOVE $V0 $T1        ; Résultat triple dans $T1
+  
+  ; Addition
+  ADD $T0 $T1 $V0
+  
+  PRINT $V0
+  HALT
+```
+
+Note importante: Saut initial
+  - JMP vers corps principal pour éviter exécution accidentelle fonctions
+  - Fonctions définies avant corps mais pas exécutées
+  - Corps principal appelle explicitement fonctions via JAL
+
+
+================================================================================
+13. CONCLUSION ANALYSE
+================================================================================
+
+Complexité: ★★★☆☆ (moyenne)
+
+Points clairs:
+  ✓ Syntaxe bien définie
+  ✓ Environnement existant adaptable
+  ✓ Génération labels maîtrisée
+  ✓ Convention appel déjà établie (DEFUN)
+  ✓ Tests définis
+
+Défis identifiés:
+  ⚠ Récursion mutuelle (pré-déclaration)
+  ⚠ Saut initial pour éviter exécution fonctions
+  ⚠ Mapping paramètres → registres
+  ⚠ Gestion $RA dans appels imbriqués
+  ⚠ Tests debugging (stack traces)
+
+Temps estimé réaliste:
+  - Implémentation: 3-4h
+  - Tests: 1-2h
+  - Debug: 1h
+  - Total: 5-7h
+
+Prêt pour implémentation: OUI
+
+Prochaine étape: Extension compilateur (parser + compile-labels)
+
+================================================================================
