@@ -984,11 +984,28 @@ qui a défini la fonction, ou NIL si non trouvée."
                             (list :SW *reg-s1* *reg-sp* 0)
                             (list :SW *reg-s2* *reg-sp* 4))))
     
+    ;; CRITIQUE: Sauvegarder $t0-$t3 avant d'évaluer count-expr
+    ;; car count-expr peut utiliser ces registres et écraser les variables du LET parent
+    (setf code (append code
+                      (list (list :ADDI *reg-sp* -16 *reg-sp*)
+                            (list :SW *reg-t0* *reg-sp* 0)
+                            (list :SW *reg-t1* *reg-sp* 4)
+                            (list :SW *reg-t2* *reg-sp* 8)
+                            (list :SW *reg-t3* *reg-sp* 12))))
+    
     ;; Compiler l'expression de comptage AVANT de créer le nouvel environnement
     (setf code (append code (compile-expr count-expr env)))
     
     ;; Sauvegarder le count dans $s2 (limite) - $S2 est callee-saved donc safe
     (setf code (append code (list (list :MOVE *reg-v0* *reg-s2*))))
+    
+    ;; Restaurer $t0-$t3 pour que les variables du LET parent soient intactes
+    (setf code (append code
+                      (list (list :LW *reg-sp* 0 *reg-t0*)
+                            (list :LW *reg-sp* 4 *reg-t1*)
+                            (list :LW *reg-sp* 8 *reg-t2*)
+                            (list :LW *reg-sp* 12 *reg-t3*)
+                            (list :ADDI *reg-sp* 16 *reg-sp*))))
     
     ;; Créer le nouvel environnement APRÈS avoir évalué count
     (let ((new-env (copy-env env)))
@@ -1032,8 +1049,10 @@ qui a défini la fonction, ou NIL si non trouvée."
                               (list :ADDI *reg-sp* 8 *reg-sp*))))
     
       ;; Compiler l'expression résultat si présente, sinon retourner nil (0)
+      ;; IMPORTANT: Utiliser env (environnement parent) pas new-env pour result-expr
+      ;; car result-expr doit accéder aux variables du LET parent
       (if result-expr
-          (setf code (append code (compile-expr result-expr new-env)))
+          (setf code (append code (compile-expr result-expr env)))
           (setf code (append code (list (list :LI 0 *reg-v0*)))))
       
       code)))
@@ -1127,12 +1146,13 @@ qui a défini la fonction, ou NIL si non trouvée."
               (setf code (append code (list (list :MOVE *reg-sp* (get-reg :fp)))))
               
               ;; 3. Sauvegarder static link (FP parent) à FP+8
-              ;;    Pour l'instant, utiliser FP parent de l'environnement appelant
-              ;;    (sera passé correctement par compile-call)
+              ;;    $S0 contient le static link reçu de l'appelant
               (setf code (append code (list (list :SW *reg-s0* (get-reg :fp) 8))))
               
-              ;; 4. Préparer $S0 avec notre FP (pour passer aux fonctions locales imbriquées)
-              (setf code (append code (list (list :MOVE (get-reg :fp) *reg-s0*))))
+              ;; 4. GARDER $S0 intact !
+              ;;    $S0 doit contenir le static link reçu pour le passer aux autres fonctions locales
+              ;;    du même niveau (elles doivent partager le même environnement parent)
+              ;; PAS DE: (MOVE $FP $S0) car ça casserait les appels entre fonctions locales
               
               ;; 5. Allouer espace pour les paramètres
               (let ((stack-size (* 4 num-params)))
@@ -1267,11 +1287,10 @@ qui a défini la fonction, ou NIL si non trouvée."
                             (list :SW *reg-s0* *reg-sp* 0)
                             (list :SW *reg-ra* *reg-sp* 4))))
     
-    ;; PHASE 9 CLOSURES: Si fonction locale, sauvegarder notre FP dans $t3
-    ;; avant de compiler les arguments (qui peuvent modifier $FP via des appels).
-    ;; Notre FP sera le static link pour la fonction appelée.
+    ;; PHASE 9 CLOSURES: Si fonction locale, utiliser $S0 comme static link
+    ;; $S0 contient le bon static link à passer (initialisé correctement dans chaque fonction)
     (when is-local-fn
-      (setf code (append code (list (list :MOVE (get-reg :fp) *reg-t3*)))))
+      (setf code (append code (list (list :MOVE *reg-s0* *reg-t3*)))))
     
     ;; Compiler les arguments et les placer dans $a0-$a3
     (loop for arg in args
@@ -1281,7 +1300,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                                  arg-code
                                  (list (list :MOVE *reg-v0* reg))))))
     
-    ;; PHASE 9 CLOSURES: Juste avant l'appel, copier le static link sauvegardé dans $s0
+    ;; PHASE 9 CLOSURES: Juste avant l'appel, restaurer le static link sauvegardé dans $s0
     (when is-local-fn
       (setf code (append code (list (list :MOVE *reg-t3* *reg-s0*)))))
     

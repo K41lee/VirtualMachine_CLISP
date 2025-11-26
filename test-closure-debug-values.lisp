@@ -1,0 +1,66 @@
+;;;; test-closure-debug-values.lisp
+;;;; Afficher les valeurs intermédiaires
+
+(load "loader.lisp")
+(load "compiler.lisp")
+(load "vm.lisp")
+
+(format t "~%=== TEST : Valeurs intermédiaires ===~%")
+
+;; Test: Appeler mult une fois
+(format t "~%Test 1: (labels ((outer (factor) (labels ((mult (n) (* factor n))) (mult 3)))) (outer 2))~%")
+(let* ((expr1 '(labels ((outer (factor)
+                          (labels ((mult (n)
+                                     (* factor n)))
+                            (mult 3))))
+                 (outer 2)))
+       (vm1 (compile-and-run expr1))
+       (result1 (get-register vm1 *reg-v0*)))
+  (format t "Résultat: ~A (attendu: 6)~%" result1))
+
+;; Test: Appeler mult deux fois séparément
+(format t "~%Test 2: Premier appel mult(3), puis second appel mult(6)~%")
+(let* ((expr2 '(labels ((outer (factor)
+                          (labels ((mult (n)
+                                     (* factor n)))
+                            (mult 6))))
+                 (outer 2)))
+       (vm2 (compile-and-run expr2))
+       (result2 (get-register vm2 *reg-v0*)))
+  (format t "Résultat: ~A (attendu: 12)~%" result2))
+
+;; Test: twice qui appelle mult
+(format t "~%Test 3: twice appelle mult avec un argument constant~%")
+(format t "(labels ((outer (factor)~%")
+(format t "           (labels ((mult (n) (* factor n))~%")
+(format t "                    (twice (n) (mult 6)))~%")
+(format t "             (twice 999))))~%")
+(format t "  (outer 2))~%")
+(let* ((expr3 '(labels ((outer (factor)
+                          (labels ((mult (n)
+                                     (* factor n))
+                                   (twice (n)
+                                     (mult 6)))
+                            (twice 999))))
+                 (outer 2)))
+       (vm3 (compile-and-run expr3))
+       (result3 (get-register vm3 *reg-v0*)))
+  (format t "Résultat: ~A (attendu: 12)~%" result3))
+
+;; Test: twice qui utilise son paramètre
+(format t "~%Test 4: twice utilise son propre paramètre~%")
+(format t "(labels ((outer (factor)~%")
+(format t "           (labels ((mult (n) (* factor n))~%")
+(format t "                    (twice (n) (mult n)))~%")
+(format t "             (twice 6))))~%")
+(format t "  (outer 2))~%")
+(let* ((expr4 '(labels ((outer (factor)
+                          (labels ((mult (n)
+                                     (* factor n))
+                                   (twice (n)
+                                     (mult n)))
+                            (twice 6))))
+                 (outer 2)))
+       (vm4 (compile-and-run expr4))
+       (result4 (get-register vm4 *reg-v0*)))
+  (format t "Résultat: ~A (attendu: 12)~%" result4))
