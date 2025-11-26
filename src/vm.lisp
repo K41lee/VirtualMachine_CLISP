@@ -1,7 +1,7 @@
 ;;;; vm.lisp
-;;;; Machine virtuelle pour l'exécution de code assembleur
+;;;; Machine virtuelle pour exécuter du code assembleur MIPS
 
-(load "asm-ops.lisp")
+(load "src/asm-ops.lisp")  ; Charger les opérations depuis src/
 
 ;;; ============================================================================
 ;;; STRUCTURE DE LA VM

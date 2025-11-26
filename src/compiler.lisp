@@ -1,7 +1,7 @@
 ;;;; compiler.lisp
 ;;;; Compilateur LISP vers assembleur MIPS
 
-(load "loader.lisp")
+;; Note: loader.lisp est chargé par main.lisp avant compiler.lisp
 
 ;;; ============================================================================
 ;;; DÉFINITION SÉCURISÉE DES REGISTRES (évite problème $ dans CLISP)

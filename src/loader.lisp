@@ -1,7 +1,7 @@
 ;;;; loader.lisp
 ;;;; Chargeur de code assembleur dans la VM
 
-(load "vm.lisp")
+;; Note: vm.lisp est chargé par main.lisp, pas ici
 
 ;;; ============================================================================
 ;;; RÉSOLUTION DES LABELS
