@@ -85,6 +85,18 @@
   "Recherche une fonction dans l'environnement, retourne son label ASM"
   (cdr (assoc fn-name (compiler-env-functions env))))
 
+(defun lookup-function-def-info (env fn-name)
+  "Recherche une fonction le long de la chaîne parent-lexical.
+Retourne (LABEL . DEPTH) où DEPTH est la profondeur lexicale de l'environnement
+qui a défini la fonction, ou NIL si non trouvée."  
+  (let ((current-env env))
+    (loop
+      (unless current-env (return nil))
+      (let ((label (cdr (assoc fn-name (compiler-env-functions current-env)))))
+        (when label
+          (return (cons label (compiler-env-lexical-depth current-env)))))
+      (setf current-env (compiler-env-parent-lexical current-env)))))
+
 (defun copy-env (env)
   "Crée une copie d'environnement pour un nouveau scope (let, labels, etc.)"
   (let ((new-env (make-compiler-env)))
@@ -222,6 +234,30 @@
          ;; Structure conditionnelle IF
          (if
           (list :if (first args) (second args) (third args)))
+         
+         ;; Structure conditionnelle COND
+         (cond
+          (list :cond args))
+         
+         ;; Structure WHEN (if sans else)
+         (when
+          (list :when (first args) (rest args)))
+         
+         ;; Structure UNLESS (if inversé)
+         (unless
+          (list :unless (first args) (rest args)))
+         
+         ;; Opérateur NOT
+         (not
+          (list :not (first args)))
+         
+         ;; Opérateur AND (court-circuit)
+         (and
+          (list :and args))
+         
+         ;; Opérateur OR (court-circuit)
+         (or
+          (list :or args))
          
          ;; Structure LET
          (let
@@ -453,6 +489,202 @@
     ;; Fin du IF
     (setf code (append code
                       (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-cond (clauses env)
+  "Compile une structure cond avec plusieurs clauses (test expr)
+   Syntaxe: (cond (test1 expr1) (test2 expr2) ... (t expr-default))
+   Évalue séquentiellement les tests jusqu'à trouver un test vrai."
+  (let ((label-end (gen-label env "COND_END"))
+        (code '()))
+    
+    ;; Pour chaque clause
+    (dolist (clause clauses)
+      (let ((test (first clause))
+            (expr (second clause))
+            (label-next (gen-label env "COND_NEXT")))
+        
+        ;; Si test = T, c'est la clause par défaut (toujours vraie)
+        (if (eq test t)
+            (progn
+              ;; Compiler l'expression et sauter à la fin
+              (setf code (append code (compile-expr expr env)))
+              (setf code (append code (list (list :J label-end)))))
+            (progn
+              ;; Compiler le test
+              (setf code (append code (compile-expr test env)))
+              
+              ;; Si test = 0 (faux), sauter à la clause suivante
+              (setf code (append code
+                                (list (list :BEQ *reg-v0* *reg-zero* label-next))))
+              
+              ;; Compiler l'expression (test vrai)
+              (setf code (append code (compile-expr expr env)))
+              
+              ;; Sauter à la fin
+              (setf code (append code (list (list :J label-end))))
+              
+              ;; Label pour la clause suivante
+              (setf code (append code (list (list :LABEL label-next))))))))
+    
+    ;; Label de fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-when (test body env)
+  "Compile une structure when (sucre syntaxique pour if sans else)
+   Syntaxe: (when test body...)
+   Équivalent à: (if test (progn body...) nil)"
+  (let ((label-end (gen-label env "WHEN_END"))
+        (code '()))
+    
+    ;; Compiler le test
+    (setf code (append code (compile-expr test env)))
+    
+    ;; Si test = 0 (faux), sauter à la fin
+    (setf code (append code
+                      (list (list :BEQ *reg-v0* *reg-zero* label-end))))
+    
+    ;; Compiler le body (plusieurs expressions possibles)
+    (dolist (expr body)
+      (setf code (append code (compile-expr expr env))))
+    
+    ;; Label fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-unless (test body env)
+  "Compile une structure unless (sucre syntaxique pour if inversé)
+   Syntaxe: (unless test body...)
+   Équivalent à: (if (not test) (progn body...) nil)"
+  ;; unless = when avec test inversé
+  (let ((label-skip (gen-label env "UNLESS_SKIP"))
+        (label-end (gen-label env "UNLESS_END"))
+        (code '()))
+    
+    ;; Compiler le test
+    (setf code (append code (compile-expr test env)))
+    
+    ;; Si test != 0 (vrai), sauter le body
+    (setf code (append code
+                      (list (list :BNE *reg-v0* *reg-zero* label-skip))))
+    
+    ;; Compiler le body (plusieurs expressions possibles)
+    (dolist (expr body)
+      (setf code (append code (compile-expr expr env))))
+    
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; Label skip
+    (setf code (append code (list (list :LABEL label-skip))))
+    
+    ;; Label fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - OPÉRATEURS LOGIQUES (AND/OR/NOT)
+;;; ============================================================================
+
+(defun compile-not (expr env)
+  "Compile l'opérateur NOT
+   Syntaxe: (not expr)
+   Retourne 1 si expr = 0, sinon 0"
+  (let ((label-true (gen-label env "NOT_TRUE"))
+        (label-end (gen-label env "NOT_END"))
+        (code '()))
+    
+    ;; Compiler l'expression
+    (setf code (append code (compile-expr expr env)))
+    
+    ;; Si expr = 0, retourner 1
+    (setf code (append code
+                      (list (list :BEQ *reg-v0* *reg-zero* label-true))))
+    
+    ;; expr != 0, retourner 0
+    (setf code (append code (list (list :LI 0 *reg-v0*))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; expr = 0, retourner 1
+    (setf code (append code (list (list :LABEL label-true))))
+    (setf code (append code (list (list :LI 1 *reg-v0*))))
+    
+    ;; Fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-and (args env)
+  "Compile l'opérateur AND avec court-circuit
+   Syntaxe: (and expr1 expr2 ...)
+   Court-circuit: s'arrête dès qu'une expression est fausse
+   Retourne 1 si toutes vraies, 0 sinon"
+  (let ((label-false (gen-label env "AND_FALSE"))
+        (label-end (gen-label env "AND_END"))
+        (code '()))
+    
+    ;; Cas spécial: AND sans arguments = T (vrai)
+    (if (null args)
+        (return-from compile-and (list (list :LI 1 *reg-v0*))))
+    
+    ;; Évaluer chaque expression
+    (dolist (expr args)
+      ;; Compiler l'expression
+      (setf code (append code (compile-expr expr env)))
+      
+      ;; Si résultat = 0 (faux), court-circuit → aller à label-false
+      (setf code (append code
+                        (list (list :BEQ *reg-v0* *reg-zero* label-false)))))
+    
+    ;; Toutes les expressions sont vraies, retourner 1
+    (setf code (append code (list (list :LI 1 *reg-v0*))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; Une expression est fausse, retourner 0
+    (setf code (append code (list (list :LABEL label-false))))
+    (setf code (append code (list (list :LI 0 *reg-v0*))))
+    
+    ;; Fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-or (args env)
+  "Compile l'opérateur OR avec court-circuit
+   Syntaxe: (or expr1 expr2 ...)
+   Court-circuit: s'arrête dès qu'une expression est vraie
+   Retourne 1 si au moins une vraie, 0 sinon"
+  (let ((label-true (gen-label env "OR_TRUE"))
+        (label-end (gen-label env "OR_END"))
+        (code '()))
+    
+    ;; Cas spécial: OR sans arguments = NIL (faux)
+    (if (null args)
+        (return-from compile-or (list (list :LI 0 *reg-v0*))))
+    
+    ;; Évaluer chaque expression
+    (dolist (expr args)
+      ;; Compiler l'expression
+      (setf code (append code (compile-expr expr env)))
+      
+      ;; Si résultat != 0 (vrai), court-circuit → aller à label-true
+      (setf code (append code
+                        (list (list :BNE *reg-v0* *reg-zero* label-true)))))
+    
+    ;; Toutes les expressions sont fausses, retourner 0
+    (setf code (append code (list (list :LI 0 *reg-v0*))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; Une expression est vraie, retourner 1
+    (setf code (append code (list (list :LABEL label-true))))
+    (setf code (append code (list (list :LI 1 *reg-v0*))))
+    
+    ;; Fin
+    (setf code (append code (list (list :LABEL label-end))))
     
     code))
 
@@ -717,6 +949,24 @@
       (:if
        (compile-if (second parsed) (third parsed) (fourth parsed) env))
       
+      (:cond
+       (compile-cond (second parsed) env))
+      
+      (:when
+       (compile-when (second parsed) (third parsed) env))
+      
+      (:unless
+       (compile-unless (second parsed) (third parsed) env))
+      
+      (:not
+       (compile-not (second parsed) env))
+      
+      (:and
+       (compile-and (second parsed) env))
+      
+      (:or
+       (compile-or (second parsed) env))
+      
       (:let
        (compile-let (second parsed) (third parsed) env))
       
@@ -743,11 +993,13 @@
 
 (defun compile-call (func-name args env)
   "Compile un appel de fonction - gère static links pour closures"
-  (let ((code '())
-        (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*))
-        ;; Chercher fonction dans environnement local (LABELS) sinon utiliser nom global (DEFUN)
-        (target-label (or (lookup-function env func-name) func-name))
-        (is-local-fn (lookup-function env func-name)))
+  (let* ((code '())
+    (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*))
+    ;; Chercher fonction dans environnement lexical (LABELS) le long de la chaîne
+    ;; parent-lexical. lookup-function-def-info retourne (LABEL . DEPTH) ou NIL.
+    (fn-info (lookup-function-def-info env func-name))
+    (target-label (if fn-info (car fn-info) func-name))
+    (is-local-fn fn-info))
     
     ;; Sauvegarder $s0 et $ra sur la pile avant l'appel
     (setf code (append code
@@ -755,10 +1007,11 @@
                             (list :SW *reg-s0* *reg-sp* 0)
                             (list :SW *reg-ra* *reg-sp* 4))))
     
-    ;; PHASE 9 CLOSURES: Si fonction locale, préparer static link dans $s0
-    ;; IMPORTANT: Dans le prologue de chaque fonction, on fait MOVE $FP $S0
-    ;; Donc $S0 contient déjà notre FP pour passer aux enfants.
-    ;; On ne fait rien ici (on garde $S0 = notre FP pour fonctions imbriquées)
+    ;; PHASE 9 CLOSURES: Si fonction locale, sauvegarder notre FP dans $t3
+    ;; avant de compiler les arguments (qui peuvent modifier $FP via des appels).
+    ;; Notre FP sera le static link pour la fonction appelée.
+    (when is-local-fn
+      (setf code (append code (list (list :MOVE (get-reg :fp) *reg-t3*)))))
     
     ;; Compiler les arguments et les placer dans $a0-$a3
     (loop for arg in args
@@ -767,6 +1020,10 @@
                (setf code (append code
                                  arg-code
                                  (list (list :MOVE *reg-v0* reg))))))
+    
+    ;; PHASE 9 CLOSURES: Juste avant l'appel, copier le static link sauvegardé dans $s0
+    (when is-local-fn
+      (setf code (append code (list (list :MOVE *reg-t3* *reg-s0*)))))
     
     ;; Appel de la fonction (locale ou globale)
     (setf code (append code (list (list :JAL target-label))))
