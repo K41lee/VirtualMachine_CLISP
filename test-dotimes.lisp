@@ -1,0 +1,126 @@
+;;;; test-dotimes.lisp
+;;;; Tests pour la boucle DOTIMES
+
+(load "loader.lisp")
+(load "compiler.lisp")
+(load "vm.lisp")
+
+(defun test-dotimes-simple ()
+  "Test 1: DOTIMES simple comptant jusqu'à 5"
+  (format t "~%=== Test 1: DOTIMES simple ===~%")
+  (let* ((code '(let ((sum 0))
+                  (dotimes (i 5)
+                    (setq sum (+ sum i)))
+                  sum))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 10 = 0+1+2+3+4)~%" result)
+    (if (= result 10)
+        (progn (format t "✓ Test 1 PASSÉ~%") t)
+        (progn (format t "✗ Test 1 ÉCHOUÉ~%") nil))))
+
+(defun test-dotimes-zero ()
+  "Test 2: DOTIMES avec count=0"
+  (format t "~%=== Test 2: DOTIMES count=0 ===~%")
+  (let* ((code '(let ((x 99))
+                  (dotimes (i 0)
+                    (setq x 0))
+                  x))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 99 - boucle pas exécutée)~%" result)
+    (if (= result 99)
+        (progn (format t "✓ Test 2 PASSÉ~%") t)
+        (progn (format t "✗ Test 2 ÉCHOUÉ~%") nil))))
+
+(defun test-dotimes-with-result ()
+  "Test 3: DOTIMES avec expression résultat"
+  (format t "~%=== Test 3: DOTIMES avec résultat ===~%")
+  (let* ((code '(let ((prod 1))
+                  (dotimes (i 5 prod)
+                    (setq prod (* prod (+ i 1))))))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 120 = 1*2*3*4*5)~%" result)
+    (if (= result 120)
+        (progn (format t "✓ Test 3 PASSÉ~%") t)
+        (progn (format t "✗ Test 3 ÉCHOUÉ~%") nil))))
+
+(defun test-dotimes-nested ()
+  "Test 4: DOTIMES imbriquées"
+  (format t "~%=== Test 4: DOTIMES imbriquées ===~%")
+  (let* ((code '(let ((total 0))
+                  (dotimes (i 3)
+                    (dotimes (j 4)
+                      (setq total (+ total 1))))
+                  total))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 12 = 3*4)~%" result)
+    (if (= result 12)
+        (progn (format t "✓ Test 4 PASSÉ~%") t)
+        (progn (format t "✗ Test 4 ÉCHOUÉ~%") nil))))
+
+(defun test-dotimes-arithmetic ()
+  "Test 5: DOTIMES avec expressions arithmétiques"
+  (format t "~%=== Test 5: DOTIMES avec arithmétique ===~%")
+  (let* ((code '(let ((result 0))
+                  (dotimes (n 4)
+                    (setq result (+ result (* n n))))
+                  result))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 14 = 0+1+4+9)~%" result)
+    (if (= result 14)
+        (progn (format t "✓ Test 5 PASSÉ~%") t)
+        (progn (format t "✗ Test 5 ÉCHOUÉ~%") nil))))
+
+(defun test-dotimes-count-expr ()
+  "Test 6: DOTIMES avec expression pour count"
+  (format t "~%=== Test 6: DOTIMES count expression ===~%")
+  (let* ((code '(let ((n 3)
+                       (sum 0))
+                  (dotimes (i (+ n 2))
+                    (setq sum (+ sum i)))
+                  sum))
+         (vm (compile-and-run code))
+         (result (get-register vm *reg-v0*)))
+    (format t "Expression: ~A~%" code)
+    (format t "Résultat: ~A (attendu: 10 = 0+1+2+3+4)~%" result)
+    (if (= result 10)
+        (progn (format t "✓ Test 6 PASSÉ~%") t)
+        (progn (format t "✗ Test 6 ÉCHOUÉ~%") nil))))
+
+(defun run-all-dotimes-tests ()
+  "Exécute tous les tests DOTIMES et affiche le récapitulatif"
+  (format t "~%╔═══════════════════════════════════════╗~%")
+  (format t "║   TESTS BOUCLE DOTIMES                ║~%")
+  (format t "╚═══════════════════════════════════════╝~%")
+  
+  (let ((results (list
+                  (test-dotimes-simple)
+                  (test-dotimes-zero)
+                  (test-dotimes-with-result)
+                  (test-dotimes-nested)
+                  (test-dotimes-arithmetic)
+                  (test-dotimes-count-expr))))
+    
+    (let ((passed (count t results))
+          (total (length results)))
+      (format t "~%╔═══════════════════════════════════════╗~%")
+      (format t "║   RÉCAPITULATIF                       ║~%")
+      (format t "╠═══════════════════════════════════════╣~%")
+      (format t "║   Tests réussis: ~A/~A~19T║~%" passed total)
+      (format t "║   Taux de réussite: ~A%~17T║~%" 
+              (floor (* 100 (/ passed total))))
+      (format t "╚═══════════════════════════════════════╝~%")
+      
+      (= passed total))))
+
+;; Lancer les tests
+(run-all-dotimes-tests)

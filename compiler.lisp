@@ -259,6 +259,10 @@ qui a défini la fonction, ou NIL si non trouvée."
          (or
           (list :or args))
          
+         ;; Structure CASE (pattern matching)
+         (case
+          (list :case (first args) (rest args)))
+         
          ;; Structure LET
          (let
           (list :let (first args) (rest args)))
@@ -271,6 +275,10 @@ qui a défini la fonction, ou NIL si non trouvée."
                    (eq (third args) 'do))
               (list :loop-while (second args) (cdddr args))
               (error "Syntaxe LOOP non supportée: ~A" expr)))
+         
+         ;; Structure DOTIMES
+         (dotimes
+          (list :dotimes (first args) (rest args)))
          
          ;; SETQ (assignation variable)
          (setq
@@ -689,6 +697,76 @@ qui a défini la fonction, ou NIL si non trouvée."
     code))
 
 ;;; ============================================================================
+;;; COMPILATION - CASE (Pattern Matching)
+;;; ============================================================================
+
+(defun compile-case (keyform clauses env)
+  "Compile une structure case (pattern matching sur valeur)
+   Syntaxe: (case keyform 
+              (key1 expr1)
+              ((key2 key3) expr2)
+              (otherwise expr-default))
+   Compare keyform avec chaque key et exécute l'expression correspondante"
+  (let ((label-end (gen-label env "CASE_END"))
+        (code '()))
+    
+    ;; Compiler le keyform et le sauvegarder dans $t0
+    (setf code (append code (compile-expr keyform env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; Pour chaque clause
+    (dolist (clause clauses)
+      (let* ((keys (first clause))
+             (expr (second clause))
+             (label-next (gen-label env "CASE_NEXT"))
+             (label-match (gen-label env "CASE_MATCH")))
+        
+        ;; Si keys = OTHERWISE ou T, c'est la clause par défaut
+        (if (or (eq keys 'otherwise) (eq keys t))
+            (progn
+              ;; Compiler l'expression par défaut
+              (setf code (append code (compile-expr expr env)))
+              (setf code (append code (list (list :J label-end)))))
+            
+            (progn
+              ;; keys peut être une valeur unique ou une liste de valeurs
+              (let ((key-list (if (listp keys) keys (list keys))))
+                
+                ;; Tester chaque key
+                (dolist (key key-list)
+                  ;; Compiler la comparaison: $t0 == key
+                  (setf code (append code
+                                    (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                                          (list :SW *reg-t0* *reg-sp* 0))))
+                  
+                  ;; Charger la key à comparer
+                  (setf code (append code (compile-constant key env)))
+                  
+                  ;; Comparer
+                  (setf code (append code
+                                    (list (list :MOVE *reg-v0* *reg-s3*)
+                                          (list :LW *reg-sp* 0 *reg-s2*)
+                                          (list :ADDI *reg-sp* 4 *reg-sp*)
+                                          (list :SUB *reg-s2* *reg-s3* *reg-t2*)
+                                          (list :BEQ *reg-t2* *reg-zero* label-match))))))
+                
+                ;; Aucune key ne correspond, aller à la clause suivante
+                (setf code (append code (list (list :J label-next))))
+                
+                ;; Une key correspond, compiler l'expression
+                (setf code (append code (list (list :LABEL label-match))))
+                (setf code (append code (compile-expr expr env)))
+                (setf code (append code (list (list :J label-end))))
+                
+                ;; Label pour la clause suivante
+                (setf code (append code (list (list :LABEL label-next))))))))
+    
+    ;; Label de fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+;;; ============================================================================
 ;;; COMPILATION - LET
 ;;; ============================================================================
 
@@ -786,6 +864,77 @@ qui a défini la fonction, ou NIL si non trouvée."
                       (list (list :LABEL label-end))))
     
     code))
+
+(defun compile-dotimes (var-spec body env)
+  "Compile (dotimes (var count [result]) body...)
+   Syntaxe: (dotimes (i 10) (print i)) - boucle i de 0 à 9
+   var-spec = (var count) ou (var count result-form)"
+  (let* ((var (first var-spec))
+         (count-expr (second var-spec))
+         (result-expr (third var-spec))  ; optionnel
+         (label-start (gen-label env "DOTIMES_START"))
+         (label-end (gen-label env "DOTIMES_END"))
+         (code '()))
+    
+    ;; Sauvegarder $s1 et $s2 sur la pile (registres utilisés pour la boucle)
+    (setf code (append code
+                      (list (list :ADDI *reg-sp* -8 *reg-sp*)
+                            (list :SW *reg-s1* *reg-sp* 0)
+                            (list :SW *reg-s2* *reg-sp* 4))))
+    
+    ;; Compiler l'expression de comptage AVANT de créer le nouvel environnement
+    (setf code (append code (compile-expr count-expr env)))
+    
+    ;; Sauvegarder le count dans $s2 (limite) - $S2 est callee-saved donc safe
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-s2*))))
+    
+    ;; Créer le nouvel environnement APRÈS avoir évalué count
+    (let ((new-env (copy-env env)))
+      
+      ;; Initialiser la variable d'indice à 0 dans $s1
+      (setf code (append code (list (list :LI 0 *reg-s1*))))
+      
+      ;; Ajouter la variable d'indice à l'environnement (registre $s1)
+      (add-variable new-env var *reg-s1*)
+      
+      ;; Label début de boucle
+      (setf code (append code (list (list :LABEL label-start))))
+      
+      ;; Comparer i < count : si i >= count, sortir
+      ;; SLT $t2 $s1 $s2  =>  $t2 = ($s1 < $s2)
+      (setf code (append code
+                        (list (list :SLT *reg-s1* *reg-s2* *reg-t2*))))
+      
+      ;; Si $t2 = 0 (i >= count), sortir
+      (setf code (append code
+                        (list (list :BEQ *reg-t2* *reg-zero* label-end))))
+      
+      ;; Compiler le corps de la boucle avec le nouvel environnement
+      (dolist (expr body)
+        (setf code (append code (compile-expr expr new-env))))
+      
+      ;; Incrémenter i: $s1 = $s1 + 1
+      (setf code (append code
+                        (list (list :ADDI *reg-s1* 1 *reg-s1*))))
+      
+      ;; Retour au début de la boucle
+      (setf code (append code (list (list :J label-start))))
+      
+      ;; Label fin de boucle
+      (setf code (append code (list (list :LABEL label-end))))
+      
+      ;; Restaurer $s1 et $s2 AVANT d'évaluer l'expression résultat
+      (setf code (append code
+                        (list (list :LW *reg-sp* 0 *reg-s1*)
+                              (list :LW *reg-sp* 4 *reg-s2*)
+                              (list :ADDI *reg-sp* 8 *reg-sp*))))
+    
+      ;; Compiler l'expression résultat si présente, sinon retourner nil (0)
+      (if result-expr
+          (setf code (append code (compile-expr result-expr new-env)))
+          (setf code (append code (list (list :LI 0 *reg-v0*)))))
+      
+      code)))
 
 ;;; ============================================================================
 ;;; COMPILATION - SETQ (assignation variable)
@@ -967,11 +1116,17 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:or
        (compile-or (second parsed) env))
       
+      (:case
+       (compile-case (second parsed) (third parsed) env))
+      
       (:let
        (compile-let (second parsed) (third parsed) env))
       
       (:loop-while
        (compile-loop-while (second parsed) (third parsed) env))
+      
+      (:dotimes
+       (compile-dotimes (second parsed) (third parsed) env))
       
       (:setq
        (compile-setq (second parsed) (third parsed) env))
