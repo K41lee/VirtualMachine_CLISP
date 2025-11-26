@@ -23,6 +23,13 @@
 (defparameter *reg-s1* (get-reg :s1))
 (defparameter *reg-s2* (get-reg :s2))
 (defparameter *reg-s3* (get-reg :s3))
+(defparameter *reg-s4* (get-reg :s4))
+(defparameter *reg-s5* (get-reg :s5))
+(defparameter *reg-s6* (get-reg :s6))
+(defparameter *reg-s7* (get-reg :s7))
+(defparameter *reg-s1* (get-reg :s1))
+(defparameter *reg-s2* (get-reg :s2))
+(defparameter *reg-s3* (get-reg :s3))
 (defparameter *reg-sp* (get-reg :sp))
 (defparameter *reg-ra* (get-reg :ra))
 (defparameter *reg-zero* (get-reg :zero))
@@ -46,25 +53,19 @@
 (defun make-new-compiler-env ()
   "Crée un nouvel environnement de compilation avec pool de registres limité"
   (let ((env (make-compiler-env)))
-    ;; Initialiser le pool de registres temporaires (seulement $t0, $t1, $t2)
+    ;; PHASE 9 FIX: Utiliser registres callee-saved ($S4-$S6) pour variables LET
+    ;; au lieu de $T0-$T2 (caller-saved) pour préserver à travers appels
     (setf (compiler-env-temp-regs-available env) 
-          (list *reg-t0* *reg-t1* *reg-t2*))
+          (list *reg-s4* *reg-s5* *reg-s6*))
     env))
 
 (defun allocate-temp-reg (env)
   "Alloue un registre temporaire depuis le pool. Retourne NIL si plus disponible."
-  ;; PHASE 9 FIX TEMPORAIRE: Désactiver allocation registres pour LET
-  ;; Les registres $T0-$T2 sont caller-saved et posent problème avec les closures
-  ;; Solution: forcer l'utilisation de la pile pour les variables LET
-  nil  ; Toujours retourner nil pour forcer utilisation pile
-  
-  ;; Code original (temporairement désactivé):
-  ;; (let ((regs (compiler-env-temp-regs-available env)))
-  ;;   (when regs
-  ;;     (let ((reg (first regs)))
-  ;;       (setf (compiler-env-temp-regs-available env) (rest regs))
-  ;;       reg)))
-  )
+  (let ((regs (compiler-env-temp-regs-available env)))
+    (when regs
+      (let ((reg (first regs)))
+        (setf (compiler-env-temp-regs-available env) (rest regs))
+        reg))))
 
 (defun free-temp-reg (env reg)
   "Libère un registre temporaire et le remet dans le pool"
@@ -197,7 +198,7 @@ qui a défini la fonction, ou NIL si non trouvée."
           (push (list :MOVE (get-reg :fp) *reg-t3*) code)
           ;; Suivre static links depth-diff fois
           (loop for i from 1 to depth-diff do
-            (push (list :LW *reg-t3* 8 *reg-t3*) code))  ; Static link à FP+8
+            (push (list :LW *reg-t3* *reg-t3* 8) code))  ; Static link à FP+8 - Format: (LW dest base offset)
           (reverse code)))))
 
 ;;; ============================================================================
@@ -571,12 +572,12 @@ qui a défini la fonction, ou NIL si non trouvée."
             ;; Cas 2 : Variable sur la pile (offset depuis SP, même scope)
             ((and (consp location) (eq (car location) :stack) (= var-depth current-depth))
              (let ((offset (second location)))
-               (list (list :LW *reg-sp* offset *reg-v0*))))
+               (list (list :LW *reg-v0* *reg-sp* offset))))  ; Format: (LW dest base offset)
             
             ;; Cas 3 : Variable paramètre fonction (offset depuis FP, même scope)
             ((and (consp location) (eq (car location) :fp) (= var-depth current-depth))
              (let ((offset (second location)))
-               (list (list :LW (get-reg :fp) offset *reg-v0*))))
+               (list (list :LW *reg-v0* (get-reg :fp) offset))))
             
             ;; Cas 4 : Variable accessible via closure (PHASE 9)
             ((and (consp location) (eq (car location) :closure))
@@ -595,7 +596,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                 ;; Suivre static links pour atteindre scope de la variable
                 (generate-static-link-access current-depth var-depth)
                 ;; Accéder variable avec offset depuis FP trouvé (dans $t3)
-                (list (list :LW *reg-t3* offset *reg-v0*)))))
+                (list (list :LW *reg-v0* *reg-t3* offset)))))  ; Format: (LW dest base offset)
             
             ;; Cas 6 : Variable dans registre à depth parente
             ;; ATTENTION: les registres temporaires ne sont pas sauvegardés dans les frames!
@@ -616,36 +617,42 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; ============================================================================
 
 (defun compile-arithmetic (op args env)
-  "Compile une opération arithmétique - utilise la pile pour éviter conflits avec registres caller-saved"
+  "Compile une opération arithmétique - utilise position FIXE sur pile pour arg1"
   (cond
     ;; Opération binaire: (+ a b)
     ((= (length args) 2)
      (let* ((arg1 (first args))
-            (arg2 (second args))
-            (code1 (compile-expr arg1 env)))
-       ;; TOUJOURS utiliser la pile pour arg1 (sûr pour les appels récursifs)
-       ;; Les registres T sont caller-saved et peuvent être écrasés par les appels
+            (arg2 (second args)))
+       ;; PHASE 9 FIX FINAL: Allouer espace AVANT compile-expr pour protéger arg1
+       ;; des modifications de pile par appels imbriqués
        (append
-        code1
-        ;; Sauvegarder arg1 sur la pile
-        (list (list :ADDI *reg-sp* -4 *reg-sp*)
-              (list :SW *reg-v0* *reg-sp* 0))
-        ;; Compiler arg2
+        ;; 1. Réserver espace sur pile AVANT tout (2 slots : ancien$S7 + arg1)
+        (list (list :ADDI *reg-sp* -8 *reg-sp*))
+        ;; 2. Sauvegarder ancien $S7
+        (list (list :SW *reg-s7* *reg-sp* 0))
+        ;; 3. Compiler arg1 (résultat dans $v0)
+        (compile-expr arg1 env)
+        ;; 4. Sauvegarder arg1 dans slot réservé
+        (list (list :SW *reg-v0* *reg-sp* 4))
+        ;; 5. Compiler arg2 - même s'il fait des appels, nos slots sont protégés
+        ;;    car ils sont en-dessous de tous les futurs frames
         (compile-expr arg2 env)
-        ;; arg2 dans $v0, sauvegarder dans un registre temporaire
-        (list (list :MOVE *reg-v0* *reg-t1*))
-        ;; Restaurer arg1 depuis pile dans un autre registre
-        (list (list :LW *reg-sp* 0 *reg-t0*)
-              (list :ADDI *reg-sp* 4 *reg-sp*))
-        ;; Effectuer l'opération
+        ;; 6. arg2 dans $v0, arg1 dans pile[$SP+4], ancien$S7 dans pile[$SP+0]
+        ;;    Charger arg1 dans $t0
+        (list (list :LW *reg-t0* *reg-sp* 4))  ; Format: (LW dest base offset)
+        ;; 7. Restaurer ancien $S7
+        (list (list :LW *reg-s7* *reg-sp* 0))  ; Format: (LW dest base offset)
+        ;; 8. Libérer espace réservé
+        (list (list :ADDI *reg-sp* 8 *reg-sp*))
+        ;; 9. Effectuer l'opération: arg1 ($t0) OP arg2 ($v0) -> $v0
         (case op
-          (+ (list (list :ADD *reg-t0* *reg-t1* *reg-v0*)))
-          (- (list (list :SUB *reg-t0* *reg-t1* *reg-v0*)))
-          (* (list (list :MUL *reg-t0* *reg-t1*)
+          (+ (list (list :ADD *reg-t0* *reg-v0* *reg-v0*)))
+          (- (list (list :SUB *reg-t0* *reg-v0* *reg-v0*)))
+          (* (list (list :MUL *reg-t0* *reg-v0*)
                    (list :MFLO *reg-v0*)))
-          (/ (list (list :DIV *reg-t0* *reg-t1*)
+          (/ (list (list :DIV *reg-t0* *reg-v0*)
                    (list :MFLO *reg-v0*)))
-          (mod (list (list :DIV *reg-t0* *reg-t1*)
+          (mod (list (list :DIV *reg-t0* *reg-v0*)
                      (list :MFHI *reg-v0*)))
           (t (error "Opérateur arithmétique non supporté: ~A" op))))))
     
@@ -707,7 +714,7 @@ qui a défini la fonction, ou NIL si non trouvée."
         ;; y dans $v0, sauvegarder dans $t1
         (list (list :MOVE *reg-v0* *reg-t1*))
         ;; Restaurer x dans $t0
-        (list (list :LW *reg-sp* 0 *reg-t0*)
+        (list (list :LW *reg-t0* *reg-sp* 0)  ; Format: (LW dest base offset)
               (list :ADDI *reg-sp* 4 *reg-sp*))
         ;; Comparer: x > y ?
         (list (list :SLT *reg-t1* *reg-t0* *reg-t2*))  ; $t2 = (y < x) ? 1 : 0
@@ -740,7 +747,7 @@ qui a défini la fonction, ou NIL si non trouvée."
         ;; y dans $v0, sauvegarder dans $t1
         (list (list :MOVE *reg-v0* *reg-t1*))
         ;; Restaurer x dans $t0
-        (list (list :LW *reg-sp* 0 *reg-t0*)
+        (list (list :LW *reg-t0* *reg-sp* 0)  ; Format: (LW dest base offset)
               (list :ADDI *reg-sp* 4 *reg-sp*))
         ;; Comparer: x < y ?
         (list (list :SLT *reg-t0* *reg-t1* *reg-t2*))  ; $t2 = (x < y) ? 1 : 0
@@ -778,7 +785,7 @@ qui a défini la fonction, ou NIL si non trouvée."
      ;; arg2 dans $s3 (pas $t0 ou $t1 qui peuvent contenir des variables)
      (list (list :MOVE *reg-v0* *reg-s3*))
      ;; Restaurer arg1 depuis pile dans $s2
-     (list (list :LW *reg-sp* 0 *reg-s2*)
+     (list (list :LW *reg-s2* *reg-sp* 0)  ; Format: (LW dest base offset)
            (list :ADDI *reg-sp* 4 *reg-sp*))
      ;; Effectuer la comparaison ($s2 op $s3 → $v0)
      (case op
@@ -1089,7 +1096,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                   ;; Comparer
                   (setf code (append code
                                     (list (list :MOVE *reg-v0* *reg-s3*)
-                                          (list :LW *reg-sp* 0 *reg-s2*)
+                                          (list :LW *reg-s2* *reg-sp* 0)  ; Format: (LW dest base offset)
                                           (list :ADDI *reg-sp* 4 *reg-sp*)
                                           (list :SUB *reg-s2* *reg-s3* *reg-t2*)
                                           (list :BEQ *reg-t2* *reg-zero* label-match))))))
@@ -1152,7 +1159,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                                   (list (list :ADDI *reg-sp* -4 *reg-sp*)
                                         (list :SW *reg-v0* *reg-sp* 0))))
                 ;; Ajouter la variable à l'environnement (avec offset pile)
-                (add-variable new-env var (list :stack offset))  ; FIXÉ: list au lieu de cons
+                (add-variable new-env var (cons :stack offset))
                 ;; Compter les slots utilisés
                 (incf stack-slots))))))
     
@@ -1243,10 +1250,10 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     ;; Restaurer $t0-$t3 pour que les variables du LET parent soient intactes
     (setf code (append code
-                      (list (list :LW *reg-sp* 0 *reg-t0*)
-                            (list :LW *reg-sp* 4 *reg-t1*)
-                            (list :LW *reg-sp* 8 *reg-t2*)
-                            (list :LW *reg-sp* 12 *reg-t3*)
+                      (list (list :LW *reg-t0* *reg-sp* 0)  ; Format: (LW dest base offset)
+                            (list :LW *reg-t1* *reg-sp* 4)
+                            (list :LW *reg-t2* *reg-sp* 8)
+                            (list :LW *reg-t3* *reg-sp* 12)
                             (list :ADDI *reg-sp* 16 *reg-sp*))))
     
     ;; Créer le nouvel environnement APRÈS avoir évalué count
@@ -1286,8 +1293,8 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       ;; Restaurer $s1 et $s2 AVANT d'évaluer l'expression résultat
       (setf code (append code
-                        (list (list :LW *reg-sp* 0 *reg-s1*)
-                              (list :LW *reg-sp* 4 *reg-s2*)
+                        (list (list :LW *reg-s1* *reg-sp* 0)  ; Format: (LW dest base offset)
+                              (list :LW *reg-s2* *reg-sp* 4)
                               (list :ADDI *reg-sp* 8 *reg-sp*))))
     
       ;; Compiler l'expression résultat si présente, sinon retourner nil (0)
@@ -1418,8 +1425,8 @@ qui a défini la fonction, ou NIL si non trouvée."
               ;;    D'abord restaurer SP au début du frame
               (setf code (append code (list (list :MOVE (get-reg :fp) *reg-sp*))))  ; SP = FP
               ;;    Ensuite charger RA et ancien FP depuis SP
-              (setf code (append code (list (list :LW *reg-sp* 4 *reg-ra*))))  ; RA = [SP+4]
-              (setf code (append code (list (list :LW *reg-sp* 0 (get-reg :fp)))))  ; FP = [SP+0]
+              (setf code (append code (list (list :LW *reg-ra* *reg-sp* 4))))  ; RA = [SP+4] - Format: (LW dest base offset)
+              (setf code (append code (list (list :LW (get-reg :fp) *reg-sp* 0))))  ; FP = [SP+0] - Format: (LW dest base offset)
               ;;    Enfin libérer la pile (FP + RA + Static Link = 12 bytes)
               (setf code (append code (list (list :ADDI *reg-sp* 12 *reg-sp*)))))  ; SP += 12
             
@@ -1501,7 +1508,9 @@ qui a défini la fonction, ou NIL si non trouvée."
                      :variables '()
                      :functions (compiler-env-functions env)
                      :label-counter (compiler-env-label-counter env)
-                     :temp-regs-available (list *reg-t0* *reg-t1* *reg-t2*)
+                     ;; PHASE 9 FIX: Utiliser registres callee-saved ($S4-$S6) pour variables LET
+                     ;; au lieu de $T0-$T2 (caller-saved) pour préserver à travers appels
+                     :temp-regs-available (list *reg-s4* *reg-s5* *reg-s6*)
                      :stack-offset 0
                      :parent-env env
                      :lexical-depth (1+ (compiler-env-lexical-depth env))
@@ -1509,16 +1518,23 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       ;; Si la fonction a des paramètres, configurer le frame
       (when params
-        ;; Sauvegarder $FP et $RA sur la pile
-        (setf code (append code (list (list :ADDI *reg-sp* -12 *reg-sp*))))  ; SP -= 12
+        ;; Sauvegarder $FP, $RA, $S0-$S7 sur la pile
+        ;; PHASE 9 FIX: Sauvegarder $S2-$S7 pour préserver à travers appels
+        (setf code (append code (list (list :ADDI *reg-sp* -36 *reg-sp*))))  ; SP -= 36 (9 registres * 4)
         (setf code (append code (list (list :SW (get-reg :fp) *reg-sp* 0))))  ; MEM[SP+0] = FP
         (setf code (append code (list (list :SW *reg-ra* *reg-sp* 4))))       ; MEM[SP+4] = RA
         (setf code (append code (list (list :SW *reg-s0* *reg-sp* 8))))       ; MEM[SP+8] = S0 (static link)
+        (setf code (append code (list (list :SW *reg-s2* *reg-sp* 12))))      ; MEM[SP+12] = S2
+        (setf code (append code (list (list :SW *reg-s3* *reg-sp* 16))))      ; MEM[SP+16] = S3
+        (setf code (append code (list (list :SW *reg-s4* *reg-sp* 20))))      ; MEM[SP+20] = S4
+        (setf code (append code (list (list :SW *reg-s5* *reg-sp* 24))))      ; MEM[SP+24] = S5
+        (setf code (append code (list (list :SW *reg-s6* *reg-sp* 28))))      ; MEM[SP+28] = S6
+        (setf code (append code (list (list :SW *reg-s7* *reg-sp* 32))))      ; MEM[SP+32] = S7
         (setf code (append code (list (list :MOVE *reg-sp* (get-reg :fp))))) ; FP = SP
         
         ;; Charger les paramètres depuis les registres d'arguments
         ;; Convention: $a0, $a1, $a2, $a3 pour les 4 premiers paramètres
-        (let ((param-offset 12))  ; Offset après FP/RA/S0
+        (let ((param-offset 36))  ; Offset après FP/RA/S0/S2/S3/S4/S5/S6/S7
           (dolist (param params)
             (let ((reg-index (position param params)))
               (when (< reg-index 4)
@@ -1555,10 +1571,17 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       ;; Restaurer et retourner
       (when params
-        ;; Restaurer $RA et $FP
-        (setf code (append code (list (list :LW (get-reg :fp) 0 (get-reg :fp)))))  ; FP = MEM[FP+0]
+        ;; Restaurer $FP, $RA et registres $S0-$S7
+        ;; PHASE 9 FIX: Restaurer aussi $S2-$S7
+        (setf code (append code (list (list :LW (get-reg :fp) (get-reg :fp) 0))))  ; FP = MEM[FP+0] - Format: (LW dest base offset)
         (setf code (append code (list (list :LW *reg-ra* *reg-sp* 4))))            ; RA = MEM[SP+4]
-        (setf code (append code (list (list :ADDI *reg-sp* 12 *reg-sp*))))))      ; SP += 12
+        (setf code (append code (list (list :LW *reg-s2* *reg-sp* 12))))           ; S2 = MEM[SP+12]
+        (setf code (append code (list (list :LW *reg-s3* *reg-sp* 16))))           ; S3 = MEM[SP+16]
+        (setf code (append code (list (list :LW *reg-s4* *reg-sp* 20))))           ; S4 = MEM[SP+20]
+        (setf code (append code (list (list :LW *reg-s5* *reg-sp* 24))))           ; S5 = MEM[SP+24]
+        (setf code (append code (list (list :LW *reg-s6* *reg-sp* 28))))           ; S6 = MEM[SP+28]
+        (setf code (append code (list (list :LW *reg-s7* *reg-sp* 32))))           ; S7 = MEM[SP+32]
+        (setf code (append code (list (list :ADDI *reg-sp* 36 *reg-sp*))))))      ; SP += 36
       
       (setf code (append code (list (list :JR *reg-ra*)))))
     
@@ -1702,15 +1725,9 @@ qui a défini la fonction, ou NIL si non trouvée."
     (current-depth (compiler-env-lexical-depth env))
     (is-sibling (and fn-depth (= fn-depth current-depth))))
     
-    ;; Sauvegarder $s0 et $ra sur la pile avant l'appel
-    (setf code (append code
-                      (list (list :ADDI *reg-sp* -8 *reg-sp*)
-                            (list :SW *reg-s0* *reg-sp* 0)
-                            (list :SW *reg-ra* *reg-sp* 4))))
-    
-    ;; PHASE 9: Si appel de closure, compiler l'expression pour obtenir l'adresse
-    ;; PHASE 9 FIX: Sauvegarder sur la pile au lieu d'un registre temporaire
-    ;; car les registres $T0-$T2 peuvent être écrasés par la compilation des arguments
+    ;; PHASE 9: Si appel de closure, compiler l'expression pour obtenir l'adresse AVANT de sauvegarder les registres
+    ;; PHASE 9 FIX: Compiler la closure AVANT de sauvegarder $S4-$S6, sinon on sauvegarde l'ancienne valeur
+    ;; et on perd la closure après la restauration
     (when is-closure-call
       ;; Compiler l'expression qui donne la closure (ex: variable contenant une closure)
       (let ((closure-code (compile-expr func-name env)))
@@ -1719,6 +1736,17 @@ qui a défini la fonction, ou NIL si non trouvée."
         ;; Sauvegarder l'adresse de la closure sur la pile
         (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*)
                                        (list :SW *reg-v0* *reg-sp* 0))))))
+    
+    ;; Sauvegarder $s0, $ra, et $s4-$s6 (variables LET) sur la pile avant l'appel
+    ;; PHASE 9 FIX: Le lambda peut écraser $S4-$S6, donc il faut les sauvegarder
+    ;; IMPORTANT: On fait ça APRÈS avoir compilé la closure, sinon on sauvegarde l'ancien $S5 au lieu de la closure
+    (setf code (append code
+                      (list (list :ADDI *reg-sp* -20 *reg-sp*)  ; 5 registres * 4 = 20 bytes
+                            (list :SW *reg-s0* *reg-sp* 0)
+                            (list :SW *reg-ra* *reg-sp* 4)
+                            (list :SW *reg-s4* *reg-sp* 8)    ; Sauvegarder $S4
+                            (list :SW *reg-s5* *reg-sp* 12)   ; Sauvegarder $S5
+                            (list :SW *reg-s6* *reg-sp* 16))))  ; Sauvegarder $S6
     
     ;; PHASE 8 FIX: Passer le bon static link selon la relation avec la fonction appelée
     (when is-local-fn
@@ -1738,8 +1766,8 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     ;; PHASE 9: Pour appel de closure, charger le label et passer la closure dans $s1
     (when is-closure-call
-      ;; PHASE 9 FIX: Charger l'adresse de la closure depuis la pile dans $t9
-      (setf code (append code (list (list :LW *reg-sp* 0 *reg-t9*))))
+      ;; PHASE 9 FIX: La closure est maintenant à l'offset 20 (après les 5 registres de 4 bytes chacun)
+      (setf code (append code (list (list :LW *reg-t9* *reg-sp* 20))))  ; Format: (LW dest base offset)
       ;; Charger l'adresse de la fonction depuis heap[closure+0]
       (setf code (append code
                         (list (list :LI 0 *reg-t2*)                    ; offset = 0
@@ -1758,12 +1786,15 @@ qui a défini la fonction, ou NIL si non trouvée."
         ;; Appel direct via JAL
         (setf code (append code (list (list :JAL target-label)))))
     
-    ;; Restaurer $ra et $s0 après l'appel
-    ;; PHASE 9 FIX: Nettoyer aussi la closure sur la pile si nécessaire
-    (let ((stack-cleanup (if is-closure-call 12 8)))  ; 8 bytes ($ra/$s0) + 4 bytes (closure) si nécessaire
+    ;; Restaurer $ra, $s0, et $s4-$s6 après l'appel
+    ;; PHASE 9 FIX: Restaurer aussi $S4-$S6 et nettoyer la closure sur la pile si nécessaire
+    (let ((stack-cleanup (if is-closure-call 24 20)))  ; 20 bytes (5 registres) + 4 bytes (closure) si nécessaire
       (append code
-              (list (list :LW *reg-sp* 4 *reg-ra*)
-                    (list :LW *reg-sp* 0 *reg-s0*)
+              (list (list :LW *reg-ra* *reg-sp* 4)     ; Format: (LW dest base offset)
+                    (list :LW *reg-s0* *reg-sp* 0)
+                    (list :LW *reg-s4* *reg-sp* 8)     ; Restaurer $S4
+                    (list :LW *reg-s5* *reg-sp* 12)    ; Restaurer $S5
+                    (list :LW *reg-s6* *reg-sp* 16)    ; Restaurer $S6
                     (list :ADDI *reg-sp* stack-cleanup *reg-sp*))))))
 
 ;;; ============================================================================

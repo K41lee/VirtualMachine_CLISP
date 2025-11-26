@@ -258,6 +258,10 @@
   
   (let ((opcode (first instr))
         (args (rest instr)))
+    ;; PHASE 9 FIX: Ignorer les LABEL (utilisés pour les sauts, pas pour l'exécution)
+    (when (eq opcode :LABEL)
+      (return-from execute-instruction))
+    
     (case opcode
       ;; Instructions arithmétiques style MIPS
       ;; Format MIPS: (ADD src1 src2 dest) -> dest = src1 + src2
@@ -354,10 +358,11 @@
                 (set-value vm dest imm)))
       
       ;; Instructions mémoire style MIPS
-      ;; LW: Load Word - (LW base offset dest) -> dest = MEM[base + offset]
-      (:LW (let* ((base (first args))
-                  (offset (second args))
-                  (dest (third args))
+      ;; LW: Load Word - (LW dest base offset) -> dest = MEM[base + offset]
+      ;; PHASE 9 FIX: L'ordre correct généré par le compilateur est (LW dest base offset)
+      (:LW (let* ((dest (first args))
+                  (base (second args))
+                  (offset (third args))
                   (address (+ (get-value vm base) offset))
                   (val (mem-read vm address)))
              (set-value vm dest val)))
@@ -486,9 +491,14 @@
       ;; Effet: $pc = $rs
       (:JR (let* ((reg (first args))
                   (target-addr (get-value vm reg))
-                  (pc-reg (get-reg :pc)))
+                  (pc-reg (get-reg :pc))
+                  (current-pc (get-register vm pc-reg)))
               (when (vm-verbose vm)
-                (format t "  JR: Retour à l'adresse ~A~%" target-addr))
+                (format t "~%*** JR DEBUG ***~%")
+                (format t "  Current PC: ~A~%" current-pc)
+                (format t "  Register ~A contains: ~A~%" reg target-addr)
+                (format t "  Jumping to: ~A~%" target-addr)
+                (format t "******************~%"))
               ;; Sauter à l'adresse contenue dans le registre
               (set-register vm pc-reg target-addr)
               (return-from execute-instruction)))
@@ -500,10 +510,14 @@
                     (target-addr (get-value vm reg))
                     (pc-reg (get-reg :pc))
                     (ra-reg (get-reg :ra))
-                    (return-addr (1+ (get-register vm pc-reg))))
+                    (current-pc (get-register vm pc-reg))
+                    (return-addr (1+ current-pc)))
                (when (vm-verbose vm)
-                 (format t "  JALR: Sauvegarde $ra=~A, saut vers adresse ~A (depuis registre ~A)~%" 
-                         return-addr target-addr reg))
+                 (format t "~%*** JALR DEBUG ***~%")
+                 (format t "  Current PC: ~A~%" current-pc)
+                 (format t "  Target register: ~A -> address ~A~%" reg target-addr)
+                 (format t "  Return address ($ra): ~A~%" return-addr)
+                 (format t "******************~%"))
                ;; Sauvegarder l'adresse de retour dans $ra
                (set-register vm ra-reg return-addr)
                ;; Sauter à l'adresse dans le registre

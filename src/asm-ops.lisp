@@ -121,6 +121,10 @@
     (:s1 (nth 17 *register-names*))   ; :$s1
     (:s2 (nth 18 *register-names*))   ; :$s2
     (:s3 (nth 19 *register-names*))   ; :$s3
+    (:s4 (nth 20 *register-names*))   ; :$s4
+    (:s5 (nth 21 *register-names*))   ; :$s5
+    (:s6 (nth 22 *register-names*))   ; :$s6
+    (:s7 (nth 23 *register-names*))   ; :$s7
     (:t0 (nth 8 *register-names*))    ; :$t0
     (:t1 (nth 9 *register-names*))    ; :$t1
     (:t2 (nth 10 *register-names*))   ; :$t2
