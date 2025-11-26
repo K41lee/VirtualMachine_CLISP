@@ -41,7 +41,7 @@
     ;; Instructions mémoire (compatibilité)
     :LOAD :STORE :LOADI
     ;; Instructions appel de fonction
-    :JAL :JR :CALL :RET
+    :JAL :JR :JALR :CALL :RET
     ;; Instructions tas dynamique (PHASE 9 CLOSURES)
     :MALLOC :LOAD-HEAP :STORE-HEAP
     ;; Autres
@@ -129,6 +129,8 @@
     (:t5 (nth 13 *register-names*))   ; :$t5
     (:t6 (nth 14 *register-names*))   ; :$t6
     (:t7 (nth 15 *register-names*))   ; :$t7
+    (:t8 (nth 24 *register-names*))   ; :$t8
+    (:t9 (nth 25 *register-names*))   ; :$t9
     (:zero (nth 0 *register-names*))  ; :$zero
     (t (error "Registre inconnu: ~A" name))))
 
@@ -172,7 +174,7 @@
     ;; 0 arguments
     ((:NOP :HALT :RET) 0)
     ;; 1 argument
-    ((:J :JMP :JAL :JR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
+    ((:J :JMP :JAL :JR :JALR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
       :MFLO :MFHI) 1)
     ;; 2 arguments
     ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP :MALLOC) 2)

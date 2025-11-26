@@ -493,6 +493,23 @@
               (set-register vm pc-reg target-addr)
               (return-from execute-instruction)))
       
+      ;; JALR: Jump And Link Register (PHASE 9 - appel de closure)
+      ;; Format: (JALR $rs)
+      ;; Effet: $ra = $pc + 1, $pc = $rs
+      (:JALR (let* ((reg (first args))
+                    (target-addr (get-value vm reg))
+                    (pc-reg (get-reg :pc))
+                    (ra-reg (get-reg :ra))
+                    (return-addr (1+ (get-register vm pc-reg))))
+               (when (vm-verbose vm)
+                 (format t "  JALR: Sauvegarde $ra=~A, saut vers adresse ~A (depuis registre ~A)~%" 
+                         return-addr target-addr reg))
+               ;; Sauvegarder l'adresse de retour dans $ra
+               (set-register vm ra-reg return-addr)
+               ;; Sauter à l'adresse dans le registre
+               (set-register vm pc-reg target-addr)
+               (return-from execute-instruction)))
+      
       ;; Compatibilité avec ancien format
       (:JMP (let* ((label (first args))
                    (code-start (calculate-code-start vm))

@@ -13,6 +13,8 @@
 (defparameter *reg-t1* (get-reg :t1))
 (defparameter *reg-t2* (get-reg :t2))
 (defparameter *reg-t3* (get-reg :t3))
+(defparameter *reg-t8* (get-reg :t8))
+(defparameter *reg-t9* (get-reg :t9))
 (defparameter *reg-a0* (get-reg :a0))
 (defparameter *reg-a1* (get-reg :a1))
 (defparameter *reg-a2* (get-reg :a2))
@@ -51,11 +53,18 @@
 
 (defun allocate-temp-reg (env)
   "Alloue un registre temporaire depuis le pool. Retourne NIL si plus disponible."
-  (let ((regs (compiler-env-temp-regs-available env)))
-    (when regs
-      (let ((reg (first regs)))
-        (setf (compiler-env-temp-regs-available env) (rest regs))
-        reg))))
+  ;; PHASE 9 FIX TEMPORAIRE: Désactiver allocation registres pour LET
+  ;; Les registres $T0-$T2 sont caller-saved et posent problème avec les closures
+  ;; Solution: forcer l'utilisation de la pile pour les variables LET
+  nil  ; Toujours retourner nil pour forcer utilisation pile
+  
+  ;; Code original (temporairement désactivé):
+  ;; (let ((regs (compiler-env-temp-regs-available env)))
+  ;;   (when regs
+  ;;     (let ((reg (first regs)))
+  ;;       (setf (compiler-env-temp-regs-available env) (rest regs))
+  ;;       reg)))
+  )
 
 (defun free-temp-reg (env reg)
   "Libère un registre temporaire et le remet dans le pool"
@@ -295,6 +304,14 @@ qui a défini la fonction, ou NIL si non trouvée."
                    (listp (first args)))
               (list :labels (first args) (rest args))
               (error "Syntaxe LABELS incorrecte: ~A" expr)))
+         
+         ;; LAMBDA: Fonction anonyme (PHASE 9 - CLOSURES)
+         (lambda
+          ;; Syntaxe: (lambda (params) body...)
+          (if (and (>= (length args) 1)
+                   (listp (first args)))
+              (cons :lambda args)  ; args contient déjà (params body...)
+              (error "Syntaxe LAMBDA incorrecte: ~A" expr)))
          
          ;; Définition de fonction
          (defun
@@ -553,15 +570,25 @@ qui a défini la fonction, ou NIL si non trouvée."
             
             ;; Cas 2 : Variable sur la pile (offset depuis SP, même scope)
             ((and (consp location) (eq (car location) :stack) (= var-depth current-depth))
-             (let ((offset (cdr location)))
+             (let ((offset (second location)))
                (list (list :LW *reg-sp* offset *reg-v0*))))
             
             ;; Cas 3 : Variable paramètre fonction (offset depuis FP, même scope)
             ((and (consp location) (eq (car location) :fp) (= var-depth current-depth))
-             (let ((offset (cdr location)))
+             (let ((offset (second location)))
                (list (list :LW (get-reg :fp) offset *reg-v0*))))
             
-            ;; Cas 4 : Variable dans scope englobant (suivre static links)
+            ;; Cas 4 : Variable accessible via closure (PHASE 9)
+            ((and (consp location) (eq (car location) :closure))
+             (let ((closure-index (second location)))
+               ;; La fermeture est dans $s1 (passée par l'appelant)
+               ;; Structure: [Label][Size][Var0][Var1]...
+               ;; Var_i est à l'offset (2 + i) depuis le début de la fermeture
+               (let ((offset (+ 2 closure-index)))
+                 (list (list :LI offset *reg-t2*)
+                       (list :LOAD-HEAP *reg-s1* *reg-t2* *reg-v0*)))))
+            
+            ;; Cas 5 : Variable dans scope englobant (suivre static links)
             ((and (consp location) (eq (car location) :fp) (< var-depth current-depth))
              (let ((offset (cdr location)))
                (append
@@ -570,7 +597,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                 ;; Accéder variable avec offset depuis FP trouvé (dans $t3)
                 (list (list :LW *reg-t3* offset *reg-v0*)))))
             
-            ;; Cas 5 : Variable dans registre à depth parente
+            ;; Cas 6 : Variable dans registre à depth parente
             ;; ATTENTION: les registres temporaires ne sont pas sauvegardés dans les frames!
             ;; Ceci ne fonctionne que si aucun appel de fonction n'a écrasé le registre.
             ((and (symbolp location) (< var-depth current-depth))
@@ -1125,7 +1152,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                                   (list (list :ADDI *reg-sp* -4 *reg-sp*)
                                         (list :SW *reg-v0* *reg-sp* 0))))
                 ;; Ajouter la variable à l'environnement (avec offset pile)
-                (add-variable new-env var (cons :stack offset))
+                (add-variable new-env var (list :stack offset))  ; FIXÉ: list au lieu de cons
                 ;; Compter les slots utilisés
                 (incf stack-slots))))))
     
@@ -1425,6 +1452,159 @@ qui a défini la fonction, ou NIL si non trouvée."
     code))
 
 ;;; ============================================================================
+;;; COMPILATION - LAMBDA (PHASE 9 - CLOSURES)
+;;; ============================================================================
+
+(defun compile-lambda (params body env)
+  "Compile une expression LAMBDA en une fermeture (closure).
+   
+   Une fermeture est une structure allouée sur le tas contenant:
+   - [addr+0] : Adresse du code de la fonction (label)
+   - [addr+1] : Taille de l'environnement (nombre de variables capturées)
+   - [addr+2..] : Valeurs des variables capturées
+   
+   Arguments:
+   - params: Liste des paramètres de la fonction lambda
+   - body: Corps de la fonction (liste d'expressions)
+   - env: Environnement de compilation actuel
+   
+   Retourne: Code assembleur qui:
+   1. Génère le code de la fonction (sauté lors de la définition)
+   2. Alloue la structure de fermeture sur le tas
+   3. Initialise la structure avec le label et les variables capturées
+   4. Retourne l'adresse de la fermeture dans $v0"
+  
+  (let* ((code '())
+         ;; Générer un label unique pour le code de la fonction
+         (func-label (gen-label env "lambda_func"))
+         (skip-label (gen-label env "lambda_skip"))
+         
+         ;; Analyser les variables libres dans le corps de la lambda
+         (lambda-expr (append (list 'lambda params) body))
+         (free-vars (free-variables lambda-expr))
+         (num-free-vars (length free-vars))
+         (closure-size (+ 2 num-free-vars)))
+    
+    ;; ÉTAPE 1: Sauter le code de la fonction (il sera appelé plus tard)
+    (setf code (append code (list (list :J skip-label))))
+    
+    ;; ÉTAPE 2: Générer le code de la fonction lambda
+    (setf code (append code (list (list :LABEL func-label))))
+    
+    ;; Configuration du frame de la fonction
+    ;; La fonction lambda reçoit:
+    ;; - Ses paramètres sur la pile (convention MIPS)
+    ;; - Un pointeur vers la fermeture (adresse de la structure)
+    
+    ;; Créer un nouvel environnement pour la fonction
+    (let ((func-env (make-compiler-env
+                     :variables '()
+                     :functions (compiler-env-functions env)
+                     :label-counter (compiler-env-label-counter env)
+                     :temp-regs-available (list *reg-t0* *reg-t1* *reg-t2*)
+                     :stack-offset 0
+                     :parent-env env
+                     :lexical-depth (1+ (compiler-env-lexical-depth env))
+                     :parent-lexical env)))
+      
+      ;; Si la fonction a des paramètres, configurer le frame
+      (when params
+        ;; Sauvegarder $FP et $RA sur la pile
+        (setf code (append code (list (list :ADDI *reg-sp* -12 *reg-sp*))))  ; SP -= 12
+        (setf code (append code (list (list :SW (get-reg :fp) *reg-sp* 0))))  ; MEM[SP+0] = FP
+        (setf code (append code (list (list :SW *reg-ra* *reg-sp* 4))))       ; MEM[SP+4] = RA
+        (setf code (append code (list (list :SW *reg-s0* *reg-sp* 8))))       ; MEM[SP+8] = S0 (static link)
+        (setf code (append code (list (list :MOVE *reg-sp* (get-reg :fp))))) ; FP = SP
+        
+        ;; Charger les paramètres depuis les registres d'arguments
+        ;; Convention: $a0, $a1, $a2, $a3 pour les 4 premiers paramètres
+        (let ((param-offset 12))  ; Offset après FP/RA/S0
+          (dolist (param params)
+            (let ((reg-index (position param params)))
+              (when (< reg-index 4)
+                ;; Paramètre passé dans un registre $a0-$a3
+                (let ((arg-reg (case reg-index
+                                 (0 *reg-a0*)
+                                 (1 *reg-a1*)
+                                 (2 *reg-a2*)
+                                 (3 *reg-a3*))))
+                  ;; Sauvegarder le paramètre sur la pile
+                  (setf code (append code (list (list :SW arg-reg (get-reg :fp) param-offset))))
+                  ;; Enregistrer dans l'environnement (accessible via FP, pas SP!)
+                  (push (list param :fp param-offset) (compiler-env-variables func-env))
+                  (incf param-offset 4))))))
+      
+      ;; IMPORTANT: Les variables libres sont accessibles via la fermeture
+      ;; La fermeture est passée dans $s1 (par convention)
+      ;; Structure: [Label][Size][Var0][Var1]...
+      ;; Pour accéder à une variable libre:
+      ;; 1. L'adresse de la fermeture est dans $s1
+      ;; 2. Var_i est à l'offset (2 + i) * 4 depuis $s1
+      
+      ;; Ajouter les variables libres à l'environnement
+      ;; Elles sont accessibles via la fermeture dans $s1
+      (let ((var-index 0))
+        (dolist (var free-vars)
+          ;; Marquer comme accessible via closure
+          (push (list var :closure var-index) (compiler-env-variables func-env))
+          (incf var-index)))
+      
+      ;; Compiler le corps de la fonction
+      (dolist (expr body)
+        (setf code (append code (compile-expr expr func-env))))
+      
+      ;; Restaurer et retourner
+      (when params
+        ;; Restaurer $RA et $FP
+        (setf code (append code (list (list :LW (get-reg :fp) 0 (get-reg :fp)))))  ; FP = MEM[FP+0]
+        (setf code (append code (list (list :LW *reg-ra* *reg-sp* 4))))            ; RA = MEM[SP+4]
+        (setf code (append code (list (list :ADDI *reg-sp* 12 *reg-sp*))))))      ; SP += 12
+      
+      (setf code (append code (list (list :JR *reg-ra*)))))
+    
+    ;; ÉTAPE 3: Label de saut (après le code de la fonction)
+    (setf code (append code (list (list :LABEL skip-label))))
+    
+    ;; ÉTAPE 4: Allouer la structure de fermeture sur le tas
+    ;; Taille = 2 (Label + Size) + nombre de variables capturées
+    ;; Allouer avec MALLOC - utiliser $t3 pour éviter d'écraser les variables dans $t0-$t2
+    (setf code (append code (list (list :MALLOC closure-size *reg-t3*))))
+    
+    ;; ÉTAPE 5: Initialiser la structure de fermeture
+    ;; [addr+0] = Label (adresse du code)
+    ;; Note: On doit calculer l'adresse absolue du label
+    ;; Pour simplifier, on utilise un placeholder et on assume que
+    ;; le loader résoudra le label
+    
+    ;; Stocker l'adresse du label (sera résolu par le loader)
+    ;; Utiliser $t4/$t5 pour ne pas écraser les variables dans $t0-$t2
+    (setf code (append code (list (list :LI func-label (get-reg :t4)))))
+    (setf code (append code (list (list :LI 0 (get-reg :t5)))))  ; offset 0
+    (setf code (append code (list (list :STORE-HEAP (get-reg :t4) *reg-t3* (get-reg :t5)))))
+    
+    ;; Stocker la taille de l'environnement
+    (setf code (append code (list (list :LI num-free-vars (get-reg :t4)))))
+    (setf code (append code (list (list :LI 1 (get-reg :t5)))))  ; offset 1
+    (setf code (append code (list (list :STORE-HEAP (get-reg :t4) *reg-t3* (get-reg :t5)))))
+      
+    ;; ÉTAPE 6: Capturer les variables libres
+    (let ((offset 2))
+      (dolist (var free-vars)
+        ;; Compiler l'accès à la variable dans le scope actuel
+        (let ((var-code (compile-variable var env)))
+          ;; La variable est maintenant dans $v0
+          (setf code (append code var-code))
+          ;; Stocker dans la fermeture (utiliser $t4 pour offset pour ne pas écraser $t0-$t2)
+          (setf code (append code (list (list :LI offset (get-reg :t4)))))
+          (setf code (append code (list (list :STORE-HEAP *reg-v0* *reg-t3* (get-reg :t4)))))
+          (incf offset))))
+    
+    ;; ÉTAPE 7: Retourner l'adresse de la fermeture dans $v0
+    (setf code (append code (list (list :MOVE *reg-t3* *reg-v0*))))
+    
+    code))
+
+;;; ============================================================================
 ;;; COMPILATION - EXPRESSION GÉNÉRALE
 ;;; ============================================================================
 
@@ -1486,6 +1666,9 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:labels
        (compile-labels (second parsed) (third parsed) env))
       
+      (:lambda
+       (compile-lambda (second parsed) (cddr parsed) env))
+      
       (:call
        (compile-call (second parsed) (third parsed) env))
       
@@ -1499,12 +1682,17 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; ============================================================================
 
 (defun compile-call (func-name args env)
-  "Compile un appel de fonction - gère static links pour closures"
+  "Compile un appel de fonction - gère static links pour closures et appels indirects (PHASE 9)"
   (let* ((code '())
     (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*))
+    ;; PHASE 9: Détecter si c'est un appel de closure
+    ;; Si func-name est un symbole, vérifier si c'est une variable (closure) ou fonction
+    (is-variable (and (symbolp func-name) 
+                      (lookup-variable-with-depth env func-name)))
+    (is-closure-call (or (not (symbolp func-name)) is-variable))
     ;; Chercher fonction dans environnement lexical (LABELS) le long de la chaîne
     ;; parent-lexical. lookup-function-def-info retourne (LABEL . DEPTH) ou NIL.
-    (fn-info (lookup-function-def-info env func-name))
+    (fn-info (unless is-closure-call (lookup-function-def-info env func-name)))
     (target-label (if fn-info (car fn-info) func-name))
     (is-local-fn fn-info)
     ;; Déterminer quel static link passer:
@@ -1519,6 +1707,18 @@ qui a défini la fonction, ou NIL si non trouvée."
                       (list (list :ADDI *reg-sp* -8 *reg-sp*)
                             (list :SW *reg-s0* *reg-sp* 0)
                             (list :SW *reg-ra* *reg-sp* 4))))
+    
+    ;; PHASE 9: Si appel de closure, compiler l'expression pour obtenir l'adresse
+    ;; PHASE 9 FIX: Sauvegarder sur la pile au lieu d'un registre temporaire
+    ;; car les registres $T0-$T2 peuvent être écrasés par la compilation des arguments
+    (when is-closure-call
+      ;; Compiler l'expression qui donne la closure (ex: variable contenant une closure)
+      (let ((closure-code (compile-expr func-name env)))
+        ;; La closure est maintenant dans $v0
+        (setf code (append code closure-code))
+        ;; Sauvegarder l'adresse de la closure sur la pile
+        (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*)
+                                       (list :SW *reg-v0* *reg-sp* 0))))))
     
     ;; PHASE 8 FIX: Passer le bon static link selon la relation avec la fonction appelée
     (when is-local-fn
@@ -1536,18 +1736,35 @@ qui a défini la fonction, ou NIL si non trouvée."
                                  arg-code
                                  (list (list :MOVE *reg-v0* reg))))))
     
+    ;; PHASE 9: Pour appel de closure, charger le label et passer la closure dans $s1
+    (when is-closure-call
+      ;; PHASE 9 FIX: Charger l'adresse de la closure depuis la pile dans $t9
+      (setf code (append code (list (list :LW *reg-sp* 0 *reg-t9*))))
+      ;; Charger l'adresse de la fonction depuis heap[closure+0]
+      (setf code (append code
+                        (list (list :LI 0 *reg-t2*)                    ; offset = 0
+                              (list :LOAD-HEAP *reg-t9* *reg-t2* *reg-t8*))))  ; $t8 = label
+      ;; Passer l'adresse de la closure dans $s1 (convention pour closures)
+      (setf code (append code (list (list :MOVE *reg-t9* *reg-s1*)))))
+    
     ;; PHASE 8 FIX: Juste avant l'appel, restaurer le static link sauvegardé
     (when is-local-fn
       (setf code (append code (list (list :MOVE *reg-t3* *reg-s0*)))))
     
-    ;; Appel de la fonction (locale ou globale)
-    (setf code (append code (list (list :JAL target-label))))
+    ;; Appel de la fonction (locale, globale, ou via closure)
+    (if is-closure-call
+        ;; PHASE 9: Appel indirect via JALR (label dans $t8)
+        (setf code (append code (list (list :JALR *reg-t8*))))
+        ;; Appel direct via JAL
+        (setf code (append code (list (list :JAL target-label)))))
     
     ;; Restaurer $ra et $s0 après l'appel
-    (append code
-            (list (list :LW *reg-sp* 4 *reg-ra*)
-                  (list :LW *reg-sp* 0 *reg-s0*)
-                  (list :ADDI *reg-sp* 8 *reg-sp*)))))
+    ;; PHASE 9 FIX: Nettoyer aussi la closure sur la pile si nécessaire
+    (let ((stack-cleanup (if is-closure-call 12 8)))  ; 8 bytes ($ra/$s0) + 4 bytes (closure) si nécessaire
+      (append code
+              (list (list :LW *reg-sp* 4 *reg-ra*)
+                    (list :LW *reg-sp* 0 *reg-s0*)
+                    (list :ADDI *reg-sp* stack-cleanup *reg-sp*))))))
 
 ;;; ============================================================================
 ;;; COMPILATION - DÉFINITION DE FONCTION
