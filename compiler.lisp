@@ -227,6 +227,10 @@ qui a défini la fonction, ou NIL si non trouvée."
          ((+ - * / mod)
           (list :arithmetic op args))
          
+         ;; Fonctions mathématiques
+         ((abs max min)
+          (list :math-func op args))
+         
          ;; Opérateurs de comparaison
          ((< > <= >= = /=)
           (list :comparison op args))
@@ -411,6 +415,104 @@ qui a défini la fonction, ou NIL si non trouvée."
                         env))
     
     (t (error "Nombre d'arguments incorrect pour ~A: ~A" op (length args)))))
+
+;;; ============================================================================
+;;; COMPILATION - FONCTIONS MATHÉMATIQUES
+;;; ============================================================================
+
+(defun compile-math-func (func args env)
+  "Compile les fonctions mathématiques: abs, max, min"
+  (case func
+    (abs
+     ;; (abs x) - valeur absolue
+     ;; Si x < 0 alors -x sinon x
+     (if (not (= (length args) 1))
+         (error "ABS attend 1 argument, reçu: ~A" (length args)))
+     (let* ((arg (first args))
+            (code (compile-expr arg env))
+            (label-positive (gen-label env "ABS_POS"))
+            (label-end (gen-label env "ABS_END")))
+       (append
+        code
+        ;; x est dans $v0
+        ;; Tester si x >= 0
+        (list (list :SLT *reg-v0* *reg-zero* *reg-t0*))  ; $t0 = (x < 0) ? 1 : 0
+        (list (list :BEQ *reg-t0* *reg-zero* label-positive))  ; Si x >= 0, sauter
+        ;; x < 0: calculer -x
+        (list (list :SUB *reg-zero* *reg-v0* *reg-v0*))  ; $v0 = 0 - x
+        (list (list :J label-end))
+        ;; x >= 0: garder x tel quel
+        (list (list :LABEL label-positive))
+        ;; Fin
+        (list (list :LABEL label-end)))))
+    
+    (max
+     ;; (max x y) - maximum de deux valeurs
+     (if (not (= (length args) 2))
+         (error "MAX attend 2 arguments, reçu: ~A" (length args)))
+     (let* ((arg1 (first args))
+            (arg2 (second args))
+            (code1 (compile-expr arg1 env))
+            (label-x-greater (gen-label env "MAX_X"))
+            (label-end (gen-label env "MAX_END")))
+       (append
+        code1
+        ;; Sauvegarder x sur la pile
+        (list (list :ADDI *reg-sp* -4 *reg-sp*)
+              (list :SW *reg-v0* *reg-sp* 0))
+        ;; Compiler y
+        (compile-expr arg2 env)
+        ;; y dans $v0, sauvegarder dans $t1
+        (list (list :MOVE *reg-v0* *reg-t1*))
+        ;; Restaurer x dans $t0
+        (list (list :LW *reg-sp* 0 *reg-t0*)
+              (list :ADDI *reg-sp* 4 *reg-sp*))
+        ;; Comparer: x > y ?
+        (list (list :SLT *reg-t1* *reg-t0* *reg-t2*))  ; $t2 = (y < x) ? 1 : 0
+        (list (list :BNE *reg-t2* *reg-zero* label-x-greater))  ; Si y < x, retourner x
+        ;; Sinon retourner y
+        (list (list :MOVE *reg-t1* *reg-v0*))
+        (list (list :J label-end))
+        ;; x est plus grand
+        (list (list :LABEL label-x-greater))
+        (list (list :MOVE *reg-t0* *reg-v0*))
+        ;; Fin
+        (list (list :LABEL label-end)))))
+    
+    (min
+     ;; (min x y) - minimum de deux valeurs
+     (if (not (= (length args) 2))
+         (error "MIN attend 2 arguments, reçu: ~A" (length args)))
+     (let* ((arg1 (first args))
+            (arg2 (second args))
+            (code1 (compile-expr arg1 env))
+            (label-x-smaller (gen-label env "MIN_X"))
+            (label-end (gen-label env "MIN_END")))
+       (append
+        code1
+        ;; Sauvegarder x sur la pile
+        (list (list :ADDI *reg-sp* -4 *reg-sp*)
+              (list :SW *reg-v0* *reg-sp* 0))
+        ;; Compiler y
+        (compile-expr arg2 env)
+        ;; y dans $v0, sauvegarder dans $t1
+        (list (list :MOVE *reg-v0* *reg-t1*))
+        ;; Restaurer x dans $t0
+        (list (list :LW *reg-sp* 0 *reg-t0*)
+              (list :ADDI *reg-sp* 4 *reg-sp*))
+        ;; Comparer: x < y ?
+        (list (list :SLT *reg-t0* *reg-t1* *reg-t2*))  ; $t2 = (x < y) ? 1 : 0
+        (list (list :BNE *reg-t2* *reg-zero* label-x-smaller))  ; Si x < y, retourner x
+        ;; Sinon retourner y
+        (list (list :MOVE *reg-t1* *reg-v0*))
+        (list (list :J label-end))
+        ;; x est plus petit
+        (list (list :LABEL label-x-smaller))
+        (list (list :MOVE *reg-t0* *reg-v0*))
+        ;; Fin
+        (list (list :LABEL label-end)))))
+    
+    (t (error "Fonction mathématique non supportée: ~A" func))))
 
 ;;; ============================================================================
 ;;; COMPILATION - COMPARAISON
@@ -1091,6 +1193,9 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       (:arithmetic
        (compile-arithmetic (second parsed) (third parsed) env))
+      
+      (:math-func
+       (compile-math-func (second parsed) (third parsed) env))
       
       (:comparison
        (compile-comparison (second parsed) (third parsed) env))
