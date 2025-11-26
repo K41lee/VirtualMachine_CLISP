@@ -309,6 +309,221 @@ qui a défini la fonction, ou NIL si non trouvée."
     (t (error "Expression LISP non reconnue: ~A" expr))))
 
 ;;; ============================================================================
+;;; ANALYSE DES VARIABLES LIBRES (PHASE 9 - CLOSURES)
+;;; ============================================================================
+
+(defparameter *built-in-operators*
+  '(+ - * / mod
+    = < > <= >= /=
+    and or not
+    if cond when unless case
+    let labels lambda
+    setq quote
+    defun
+    loop dotimes
+    cons car cdr list
+    null atom listp numberp symbolp
+    eq eql equal
+    append reverse length
+    print format)
+  "Liste des opérateurs et fonctions built-in qui ne sont pas des variables")
+
+(defun free-variables (expr &optional (bound-vars '()))
+  "Retourne la liste des variables libres dans une expression.
+   Une variable est libre si elle est référencée mais pas liée localement.
+   
+   Arguments:
+   - expr: Expression LISP à analyser
+   - bound-vars: Liste des variables actuellement liées (dans le scope)
+   
+   Retourne: Liste de symboles (variables libres), sans doublons"
+  
+  (cond
+    ;; Cas 1: Constante (nombre, nil, t) -> pas de variables libres
+    ((or (numberp expr) (null expr) (eq expr t))
+     '())
+    
+    ;; Cas 2: Symbole (variable)
+    ((symbolp expr)
+     (cond
+       ;; Variable liée -> pas libre
+       ((member expr bound-vars) '())
+       ;; Opérateur built-in -> pas une variable
+       ((member expr *built-in-operators*) '())
+       ;; Variable libre
+       (t (list expr))))
+    
+    ;; Cas 3: Liste vide
+    ((null expr)
+     '())
+    
+    ;; Cas 4: Atom non-symbole (string, etc.)
+    ((atom expr)
+     '())
+    
+    ;; Cas 5: Expression liste - analyser selon la forme
+    ((listp expr)
+     (let ((op (first expr))
+           (args (rest expr)))
+       
+       (case op
+         ;; LAMBDA: (lambda (params) body)
+         ;; Les paramètres deviennent des variables liées dans le corps
+         (lambda
+          (if (and (>= (length args) 2)
+                   (listp (first args)))
+              (let* ((params (first args))
+                     (body (rest args))
+                     (new-bound (append params bound-vars)))
+                ;; Analyser le corps avec les paramètres comme variables liées
+                (free-variables-list body new-bound))
+              (error "Syntaxe LAMBDA invalide: ~A" expr)))
+         
+         ;; LET: (let ((var1 val1) (var2 val2)) body)
+         ;; Les valeurs sont évaluées AVANT que les vars soient liées
+         (let
+          (if (and (>= (length args) 2)
+                   (listp (first args)))
+              (let* ((bindings (first args))
+                     (body (rest args))
+                     ;; Variables liées par LET
+                     (let-vars (mapcar #'first bindings))
+                     ;; Valeurs d'initialisation
+                     (let-vals (mapcar #'second bindings)))
+                ;; Variables libres = union de:
+                ;; 1) Variables libres dans les valeurs (scope externe)
+                ;; 2) Variables libres dans le corps (avec let-vars liées)
+                (union (free-variables-list let-vals bound-vars)
+                       (free-variables-list body (append let-vars bound-vars))
+                       :test #'eq))
+              (error "Syntaxe LET invalide: ~A" expr)))
+         
+         ;; LABELS: (labels ((fn1 (params1) body1) ...) body)
+         ;; Toutes les fonctions sont mutuellement récursives
+         (labels
+          (if (and (>= (length args) 2)
+                   (listp (first args)))
+              (let* ((definitions (first args))
+                     (body (rest args))
+                     ;; Noms des fonctions locales
+                     (func-names (mapcar #'first definitions))
+                     ;; Les fonctions sont liées dans tout le LABELS
+                     (new-bound (append func-names bound-vars)))
+                ;; Analyser chaque définition de fonction
+                (let ((defs-free-vars
+                        (mapcan
+                         (lambda (def)
+                           (let* ((params (second def))
+                                  (func-body (cddr def))
+                                  ;; Dans le corps de la fonction:
+                                  ;; - paramètres liés
+                                  ;; - noms de fonctions liés
+                                  (func-bound (append params new-bound)))
+                             (free-variables-list func-body func-bound)))
+                         definitions)))
+                  ;; Union avec variables libres du corps principal
+                  (union defs-free-vars
+                         (free-variables-list body new-bound)
+                         :test #'eq)))
+              (error "Syntaxe LABELS invalide: ~A" expr)))
+         
+         ;; SETQ: (setq var value)
+         (setq
+          (if (= (length args) 2)
+              (let ((var (first args))
+                    (value (second args)))
+                ;; La variable assignée est considérée comme référencée
+                (union (if (member var bound-vars)
+                           '()
+                           (list var))
+                       (free-variables value bound-vars)
+                       :test #'eq))
+              (error "Syntaxe SETQ invalide: ~A" expr)))
+         
+         ;; IF: (if condition then else)
+         (if
+          (free-variables-list args bound-vars))
+         
+         ;; COND: (cond (test1 body1) (test2 body2) ...)
+         (cond
+          (free-variables-list 
+           (mapcan (lambda (clause) clause) args)
+           bound-vars))
+         
+         ;; WHEN, UNLESS: (when test body...)
+         ((when unless)
+          (free-variables-list args bound-vars))
+         
+         ;; AND, OR: court-circuit logique
+         ((and or)
+          (free-variables-list args bound-vars))
+         
+         ;; NOT: (not expr)
+         (not
+          (free-variables (first args) bound-vars))
+         
+         ;; CASE: (case keyform (key1 body1) (key2 body2) ...)
+         (case
+          (if (>= (length args) 1)
+              (union (free-variables (first args) bound-vars)
+                     (free-variables-list 
+                      (mapcan (lambda (clause) (rest clause)) (rest args))
+                      bound-vars)
+                     :test #'eq)
+              '()))
+         
+         ;; LOOP, DOTIMES: (loop while cond do body) / (dotimes (var count) body)
+         ((loop dotimes)
+          ;; Pour DOTIMES: (dotimes (var count-expr result-expr) body)
+          (if (eq op 'dotimes)
+              (let* ((var-spec (first args))
+                     (loop-var (if (listp var-spec) (first var-spec) nil))
+                     (count-expr (if (listp var-spec) (second var-spec) nil))
+                     (body (rest args)))
+                (if loop-var
+                    ;; count-expr évalué dans scope externe, body avec loop-var lié
+                    (union (free-variables count-expr bound-vars)
+                           (free-variables-list body (cons loop-var bound-vars))
+                           :test #'eq)
+                    (free-variables-list args bound-vars)))
+              ;; LOOP générique
+              (free-variables-list args bound-vars)))
+         
+         ;; QUOTE: (quote x) -> pas de variables libres
+         (quote '())
+         
+         ;; DEFUN: (defun name params body) - traiter comme top-level
+         (defun
+          (if (>= (length args) 3)
+              (let* ((params (second args))
+                     (body (cddr args))
+                     (func-bound (append params bound-vars)))
+                (free-variables-list body func-bound))
+              '()))
+         
+         ;; Appel de fonction ou opérateur: (op arg1 arg2 ...)
+         ;; Toutes les sous-expressions peuvent contenir des variables libres
+         (t
+          (free-variables-list expr bound-vars)))))
+    
+    ;; Cas par défaut
+    (t '())))
+
+(defun free-variables-list (expr-list bound-vars)
+  "Retourne l'union des variables libres de toutes les expressions dans la liste.
+   
+   Arguments:
+   - expr-list: Liste d'expressions LISP
+   - bound-vars: Variables actuellement liées
+   
+   Retourne: Liste de variables libres sans doublons"
+  (if (null expr-list)
+      '()
+      (union (free-variables (first expr-list) bound-vars)
+             (free-variables-list (rest expr-list) bound-vars)
+             :test #'eq)))
+
+;;; ============================================================================
 ;;; COMPILATION - CONSTANTES
 ;;; ============================================================================
 
