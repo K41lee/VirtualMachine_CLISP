@@ -1191,6 +1191,18 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; ÉTAPE 4: Label du corps principal et compilation
     (setf code (append code (list (list :LABEL body-label))))
     
+    ;; PHASE 8 FIX: Le corps d'un LABELS doit initialiser $S0 correctement
+    ;; Si on est dans une fonction (parent-lexical non-nil), les fonctions locales
+    ;; doivent recevoir $FP du scope actuel comme static link.
+    ;; Si on est au niveau global (parent-lexical nil), utiliser 0.
+    (when (compiler-env-parent-lexical new-env)
+      ;; On est dans une fonction, initialiser $S0 = $FP du parent
+      ;; Mais le corps du LABELS n'a pas son propre FP, donc on doit chercher
+      ;; le FP de la fonction englobante. Pour simplifier, on utilise $FP actuel.
+      ;; Note: $FP contient déjà le frame pointer de la fonction englobante car
+      ;; le corps du LABELS s'exécute dans le contexte de cette fonction.
+      (setf code (append code (list (list :MOVE (get-reg :fp) *reg-s0*)))))
+    
     ;; Compiler le corps principal
     (dolist (expr body)
       (setf code (append code (compile-expr expr new-env))))
@@ -1279,7 +1291,13 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; parent-lexical. lookup-function-def-info retourne (LABEL . DEPTH) ou NIL.
     (fn-info (lookup-function-def-info env func-name))
     (target-label (if fn-info (car fn-info) func-name))
-    (is-local-fn fn-info))
+    (is-local-fn fn-info)
+    ;; Déterminer quel static link passer:
+    ;; - Si sibling (même niveau lexical) → passer $S0 (static link du parent)
+    ;; - Si enfant (fonction dans un LABELS imbriqué) → passer $FP (notre frame)
+    (fn-depth (if fn-info (cdr fn-info) nil))
+    (current-depth (compiler-env-lexical-depth env))
+    (is-sibling (and fn-depth (= fn-depth current-depth))))
     
     ;; Sauvegarder $s0 et $ra sur la pile avant l'appel
     (setf code (append code
@@ -1287,10 +1305,13 @@ qui a défini la fonction, ou NIL si non trouvée."
                             (list :SW *reg-s0* *reg-sp* 0)
                             (list :SW *reg-ra* *reg-sp* 4))))
     
-    ;; PHASE 9 CLOSURES: Si fonction locale, utiliser $S0 comme static link
-    ;; $S0 contient le bon static link à passer (initialisé correctement dans chaque fonction)
+    ;; PHASE 8 FIX: Passer le bon static link selon la relation avec la fonction appelée
     (when is-local-fn
-      (setf code (append code (list (list :MOVE *reg-s0* *reg-t3*)))))
+      (if is-sibling
+          ;; Sibling: passer $S0 tel quel (static link du parent commun)
+          (setf code (append code (list (list :MOVE *reg-s0* *reg-t3*))))
+          ;; Enfant: passer $FP (notre frame devient leur static link)
+          (setf code (append code (list (list :MOVE (get-reg :fp) *reg-t3*))))))
     
     ;; Compiler les arguments et les placer dans $a0-$a3
     (loop for arg in args
@@ -1300,7 +1321,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                                  arg-code
                                  (list (list :MOVE *reg-v0* reg))))))
     
-    ;; PHASE 9 CLOSURES: Juste avant l'appel, restaurer le static link sauvegardé dans $s0
+    ;; PHASE 8 FIX: Juste avant l'appel, restaurer le static link sauvegardé
     (when is-local-fn
       (setf code (append code (list (list :MOVE *reg-t3* *reg-s0*)))))
     
