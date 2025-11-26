@@ -4,6 +4,33 @@
 (load "src/asm-ops.lisp")  ; Charger les opérations depuis src/
 
 ;;; ============================================================================
+;;; GESTION DU TAS DYNAMIQUE (PHASE 9 - CLOSURES)
+;;; ============================================================================
+
+(defparameter *heap-pointer* +heap-start+
+  "Pointeur courant du tas pour l'allocation dynamique")
+
+(defconstant +heap-limit+ (+ +heap-start+ *heap-size*)
+  "Limite supérieure du tas (première adresse invalide)")
+
+(defun reset-heap ()
+  "Réinitialise le pointeur du tas"
+  (setf *heap-pointer* +heap-start+))
+
+(defun vm-malloc (vm size)
+  "Alloue SIZE mots sur le tas et retourne l'adresse.
+   Utilise un allocateur simple (bump allocator).
+   Pas de garbage collection."
+  (when (> (+ *heap-pointer* size) +heap-limit+)
+    (error "Heap overflow: tentative d'allocation de ~A mots, espace disponible: ~A"
+           size (- +heap-limit+ *heap-pointer*)))
+  (let ((addr *heap-pointer*))
+    (incf *heap-pointer* size)
+    (when (vm-verbose vm)
+      (format t "  MALLOC: Allocation de ~A mots à l'adresse ~A~%" size addr))
+    addr))
+
+;;; ============================================================================
 ;;; STRUCTURE DE LA VM
 ;;; ============================================================================
 
@@ -62,6 +89,7 @@
   (setf (vm-memory vm) (make-array *maxmem* :initial-element 0))
   (setf (vm-state vm) :ready)
   (setf (vm-instruction-count vm) 0)
+  (reset-heap)
   (init-registers vm)
   (init-memory-layout vm))
 
@@ -521,6 +549,49 @@
                    (val2 (get-value vm src2)))
               (set-value vm dest (if (< val1 val2) 1 0))))
       
+      ;; ======================================================================
+      ;; INSTRUCTIONS TAS DYNAMIQUE (PHASE 9 - CLOSURES)
+      ;; ======================================================================
+      
+      ;; MALLOC: Alloue de la mémoire sur le tas
+      ;; Format: (MALLOC size result-reg)
+      ;; Effet: result-reg = adresse allouée sur le tas
+      (:MALLOC (let* ((size (first args))
+                      (result-reg (second args))
+                      (size-val (get-value vm size))
+                      (addr (vm-malloc vm size-val)))
+                 (set-value vm result-reg addr)))
+      
+      ;; LOAD-HEAP: Charge une valeur depuis le tas
+      ;; Format: (LOAD-HEAP addr-reg offset result-reg)
+      ;; Effet: result-reg = MEM[addr-reg + offset]
+      (:LOAD-HEAP (let* ((addr-reg (first args))
+                         (offset (second args))
+                         (result-reg (third args))
+                         (base-addr (get-value vm addr-reg))
+                         (offset-val (get-value vm offset))
+                         (address (+ base-addr offset-val))
+                         (val (mem-read vm address)))
+                    (when (vm-verbose vm)
+                      (format t "  LOAD-HEAP: Lecture à l'adresse ~A (base=~A + offset=~A) -> ~A~%"
+                              address base-addr offset-val val))
+                    (set-value vm result-reg val)))
+      
+      ;; STORE-HEAP: Stocke une valeur dans le tas
+      ;; Format: (STORE-HEAP value-reg addr-reg offset)
+      ;; Effet: MEM[addr-reg + offset] = value-reg
+      (:STORE-HEAP (let* ((value-reg (first args))
+                          (addr-reg (second args))
+                          (offset (third args))
+                          (val (get-value vm value-reg))
+                          (base-addr (get-value vm addr-reg))
+                          (offset-val (get-value vm offset))
+                          (address (+ base-addr offset-val)))
+                     (when (vm-verbose vm)
+                       (format t "  STORE-HEAP: Écriture de ~A à l'adresse ~A (base=~A + offset=~A)~%"
+                               val address base-addr offset-val))
+                     (mem-write vm address val)))
+      
       ;; Contrôle
       (:HALT (setf (vm-state vm) :halted)
              (when (vm-verbose vm)
@@ -579,4 +650,6 @@
           mem-read mem-write dump-memory
           push-stack pop-stack peek-stack dump-stack
           vm-state vm-instruction-count vm-verbose
-          get-value set-value calculate-code-start))
+          get-value set-value calculate-code-start
+          ;; Heap management (Phase 9)
+          reset-heap vm-malloc *heap-pointer* +heap-limit+))

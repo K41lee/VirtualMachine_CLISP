@@ -42,6 +42,8 @@
     :LOAD :STORE :LOADI
     ;; Instructions appel de fonction
     :JAL :JR :CALL :RET
+    ;; Instructions tas dynamique (PHASE 9 CLOSURES)
+    :MALLOC :LOAD-HEAP :STORE-HEAP
     ;; Autres
     :NOP :HALT :LABEL :PRINT :SYSCALL)
   "Liste des opcodes supportés par la VM")
@@ -123,6 +125,10 @@
     (:t1 (nth 9 *register-names*))    ; :$t1
     (:t2 (nth 10 *register-names*))   ; :$t2
     (:t3 (nth 11 *register-names*))   ; :$t3
+    (:t4 (nth 12 *register-names*))   ; :$t4
+    (:t5 (nth 13 *register-names*))   ; :$t5
+    (:t6 (nth 14 *register-names*))   ; :$t6
+    (:t7 (nth 15 *register-names*))   ; :$t7
     (:zero (nth 0 *register-names*))  ; :$zero
     (t (error "Registre inconnu: ~A" name))))
 
@@ -169,10 +175,10 @@
     ((:J :JMP :JAL :JR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
       :MFLO :MFHI) 1)
     ;; 2 arguments
-    ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP) 2)
+    ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP :MALLOC) 2)
     ;; 3 arguments
     ((:ADD :ADDI :SUB :AND :OR :LW :SW :BEQ :BNE :BLT :BGT :SLT
-      :EQ :NE :GT :LT :GE :LE) 3)
+      :EQ :NE :GT :LT :GE :LE :LOAD-HEAP :STORE-HEAP) 3)
     (t (error "Opcode inconnu: ~A" opcode))))
 
 (defun format-instruction (instr)
