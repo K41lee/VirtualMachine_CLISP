@@ -95,13 +95,11 @@
 ;;; ============================================================================
 
 (defun my-append (lst1 lst2)
-  "Concaténation de deux listes (tail-recursive).
+  "Concaténation de deux listes.
    Équivalent à (append lst1 lst2)"
-  (labels ((append-aux (l1 acc)
-             (if (null l1)
-                 (nreverse acc)
-                 (append-aux (cdr l1) (cons (car l1) acc)))))
-    (append-aux (reverse lst1) (reverse lst2))))
+  (if (null lst1)
+      lst2
+      (cons (car lst1) (my-append (cdr lst1) lst2))))
 
 (defun my-reverse (lst)
   "Inversion de liste (tail-recursive).
