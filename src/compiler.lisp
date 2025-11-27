@@ -1360,16 +1360,44 @@ qui a défini la fonction, ou NIL si non trouvée."
 
 (defun compile-progn (exprs env)
   "Compile (progn expr1 expr2 ... exprN)
-   PHASE 11 - Extension pour séquences d'expressions
-   Évalue chaque expression dans l'ordre, retourne le résultat de la dernière"
-  (let ((code '()))
+   PHASE 11 - Extension pour séquences d'expressions + Support DEFUN
+   Évalue chaque expression dans l'ordre, retourne le résultat de la dernière
+   
+   IMPORTANT: Gère DEFUN de manière spéciale:
+   - DEFUN génère du code en tête (avant le code principal)
+   - Un saut initial permet de sauter les définitions de fonctions
+   - L'environnement est mis à jour pour que les expressions suivantes voient la fonction"
+  (let ((code '())
+        (function-defs '())
+        (has-functions nil))  ; Flag pour savoir s'il y a des DEFUN
     (if (null exprs)
         ;; PROGN vide retourne 0 (nil)
         (setf code (list (list :MOVE *reg-zero* *reg-v0*)))
         ;; Compiler chaque expression en séquence
         (dolist (expr exprs)
-          (setf code (append code (compile-expr expr env)))))
-    code))
+          ;; Vérifier si c'est un DEFUN
+          (if (and (listp expr) (eq (first expr) 'defun))
+              ;; DEFUN: compiler et ajouter au code de définitions
+              (let* ((name (second expr))
+                     (params (third expr))
+                     (body (cdddr expr))
+                     (defun-code (compile-defun name params body env)))
+                (setf has-functions t)
+                ;; Le code DEFUN va en tête
+                (setf function-defs (append function-defs defun-code))
+                ;; Enregistrer la fonction est déjà fait par compile-defun
+                )
+              ;; Expression normale: compiler et ajouter au code principal
+              (setf code (append code (compile-expr expr env))))))
+    ;; Si on a des fonctions, générer: JUMP main + fonctions + LABEL main + code
+    (if has-functions
+        (let ((main-label (gensym "MAIN")))
+          (append (list (list :J main-label))  ; Sauter les définitions
+                  function-defs
+                  (list (list :LABEL main-label))  ; Label du code principal
+                  code))
+        ;; Sinon, juste le code
+        code)))
 
 (defun compile-make-array (args env)
   "Compile (make-array size [:initial-element value])
@@ -2555,7 +2583,8 @@ qui a défini la fonction, ou NIL si non trouvée."
                               (list :JR *reg-ra*)))))            ; Retour
     
     ;; Enregistrer la fonction dans l'environnement
-    (push (cons name params) (compiler-env-functions env))
+    ;; Format: (name . label) où label est le symbole utilisé pour :JAL
+    (push (cons name func-label) (compiler-env-functions env))
     
     code))
 
