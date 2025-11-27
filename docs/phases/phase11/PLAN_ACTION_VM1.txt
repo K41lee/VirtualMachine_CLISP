@@ -315,8 +315,34 @@ Note : Les opcodes restent des keywords (:ADD, :SUB, etc.) car déjà
        supportés par CASE. Pas besoin de les encoder en entiers.
 
 ════════════════════════════════════════════════════════════════════════════
-PHASE 6 : COMPILATION VM (4-5h) 🔄 EN COURS
+PHASE 6 : COMPILATION VM - OPTION A (20-35 jours) 🔄 STRATÉGIE RÉVISÉE
 ════════════════════════════════════════════════════════════════════════════
+
+⚠️ DÉCISION STRATÉGIQUE - 27 NOVEMBRE 2025 (20:30) ⚠️
+
+Après analyse détaillée (docs/phases/phase11/ANALYSE_COMPILATION_VM.md),
+la compilation complète de la VM nécessite l'implémentation de constructions
+Lisp critiques manquantes. Nous suivons maintenant l'OPTION A : Compilation
+Complète avec implémentation incrémentale des constructions.
+
+Référence : docs/phases/phase11/ANALYSE_COMPILATION_VM.md
+  - Analyse complète des obstacles
+  - 3 options évaluées (A: complète, B: refactorisation, C: micro-VM)
+  - Option A choisie pour développement long-terme
+
+Constructions critiques manquantes :
+  ❌ DEFSTRUCT (⭐⭐⭐⭐⭐, 5-7j) - Structure VM
+  ❌ HASH-TABLES (⭐⭐⭐⭐⭐, 3-5j) - Registres (ou tableau fixe: 1j)
+  ❌ DOLIST/LOOP (⭐⭐⭐⭐⭐, 2-3j) - Itération
+  ❌ WHEN/UNLESS (⭐⭐⭐⭐, 4-6h) - Conditions simples
+  ❌ LIST OPS (⭐⭐⭐⭐, 2-4j) - Cons, car, cdr, etc.
+
+Effort total : 20-35 jours
+Couverture : 32% → 100% (8/25 → 25/25 constructions)
+
+════════════════════════════════════════════════════════════════════════════
+
+HISTORIQUE - SESSIONS PRÉCÉDENTES (Progression Initiale Abandonnée)
 
 SESSION 1-3 : EXTENSIONS COMPILATEUR (5.5h) ✅
   [✅] DEFVAR/DEFCONSTANT support (2h)
@@ -374,8 +400,350 @@ SESSION 4 : BUG FIX CRITIQUE - DOTTED PAIRS (2h) ✅
     
     Progression attendue : 62% → 77% (estimation +4-5 fonctions)
 
-PROCHAINES ÉTAPES :
-[ ] 6.6 Compiler les fonctions auxiliaires
+SESSION 5 : TESTS & ANALYSE (2h) ✅
+  [✅] Correction bug DEFUN labels (81% → 100% tests)
+  [✅] Création benchmarks performance
+  [✅] Résultats : VM0 = 500x-2400x plus lent que CLISP
+  [✅] Analyse obstacles compilation VM → Option A choisie
+
+Note : Ces sessions ont montré que l'approche initiale (compiler la VM
+       directement) nécessite trop de constructions manquantes. Changement
+       de stratégie vers Option A : implémentation incrémentale.
+
+════════════════════════════════════════════════════════════════════════════
+
+NOUVELLE FEUILLE DE ROUTE - OPTION A COMPLÈTE (20-35 jours)
+
+SPRINT 1 : CONSTRUCTIONS SIMPLES (1-2 jours) 🔄
+═══════════════════════════════════════════════════════════════════════════
+
+[ ] 6.1 Implémenter WHEN/UNLESS (4-6h)
+    Priorité : ⭐⭐⭐⭐ Haute  |  Complexité : ⭐⭐ Moyenne
+    
+    Approche : Macro expansion sur IF existant
+      (when test body...) → (if test (progn body...) nil)
+      (unless test body...) → (if (not test) (progn body...) nil)
+    
+    Nécessite d'abord : Implémenter NOT (opérateur logique)
+      (not x) → (if x nil t)
+    
+    Fichiers :
+      - src/compiler.lisp : compile-when, compile-unless, compile-not
+      - Tests : tests/unit/test-when-unless.lisp (10 tests)
+    
+    Tests attendus :
+      ✓ (when t 42) → 42
+      ✓ (when nil 42) → nil
+      ✓ (unless nil 42) → 42
+      ✓ (when (> x 5) (* x 2))
+      ✓ Body multiple expressions
+      ✓ Imbriqués
+    
+    Impact : Débloque ~30% conditions dans vm.lisp
+    Estimation : 4-6 heures
+
+[ ] 6.2 Implémenter INCF/DECF/PUSH/POP (4-6h)
+    Priorité : ⭐⭐⭐ Moyenne-Haute  |  Complexité : ⭐⭐ Moyenne
+    
+    Approche : Macros sur SETQ existant
+      (incf var delta) → (setq var (+ var delta))
+      (incf var) → (setq var (+ var 1))
+      (decf var delta) → (setq var (- var delta))
+      (push item list) → (setq list (cons item list))
+      (pop list) → (let ((x (car list))) (setq list (cdr list)) x)
+    
+    Nécessite : CAR/CDR/CONS (voir Sprint 2)
+    
+    Fichiers :
+      - src/compiler.lisp : compile-incf, compile-decf, compile-push, compile-pop
+      - Tests : tests/unit/test-incf-decf.lisp (8 tests)
+    
+    Tests attendus :
+      ✓ (let ((x 10)) (incf x) x) → 11
+      ✓ (let ((x 10)) (incf x 5) x) → 15
+      ✓ (let ((x 10)) (decf x 3) x) → 7
+      ✓ (let ((l nil)) (push 1 l) (push 2 l) l) → (2 1)
+    
+    Impact : Débloque heap pointer (*heap-pointer*), pile, listes
+    Estimation : 4-6 heures
+
+[ ] 6.3 Implémenter ERROR → PRINT+HALT (2-4h)
+    Priorité : ⭐⭐⭐ Moyenne  |  Complexité : ⭐ Faible
+    
+    Approche : Remplacement simple
+      (error "msg") → (progn (halt))
+      ou (error "msg ~A" val) → (progn (print val) (halt))
+    
+    Nécessite : PRINT basique (afficher entier en $V0)
+      - Syscall PRINT_INT (si disponible)
+      - Ou stocker dans registre dédié pour debug externe
+    
+    Fichiers :
+      - src/compiler.lisp : compile-error, compile-print (optionnel)
+      - Tests : tests/unit/test-error.lisp (5 tests)
+    
+    Tests attendus :
+      ✓ (error "test") → halt
+      ✓ (when (< x 0) (error "negative")) → halt si x<0
+    
+    Impact : Gestion erreurs (non-robuste mais fonctionnelle)
+    Estimation : 2-4 heures
+
+Total Sprint 1 : 10-16 heures (~1-2 jours)
+
+SPRINT 2 : MANIPULATION DE LISTES (2-4 jours) 🔄
+═══════════════════════════════════════════════════════════════════════════
+
+[ ] 6.4 Implémenter LIST OPS basiques (2-4 jours)
+    Priorité : ⭐⭐⭐⭐ Haute  |  Complexité : ⭐⭐⭐⭐ Élevée
+    
+    Fonctions à implémenter :
+      • CONS (allocation cons cell) - CRITIQUE
+      • CAR / FIRST (accès head)
+      • CDR / REST (accès tail)
+      • NULL (test vide, compare à 0)
+      • MEMBER (recherche dans liste) - optionnel
+      • ASSOC (recherche dans alist) - optionnel
+    
+    Représentation cons cell :
+      Structure : [CAR_VALUE][CDR_VALUE] (2 mots)
+      NIL : Adresse 0 (convention)
+      Allocation : Utiliser $GP (heap pointer) comme pour make-array
+    
+    Implémentation CONS :
+      1. Allouer 2 mots avec $GP
+      2. Stocker CAR à [addr+0]
+      3. Stocker CDR à [addr+1]
+      4. Retourner addr dans $V0
+    
+    Implémentation CAR :
+      1. LW $V0 0($A0)  ; charger mot 0
+    
+    Implémentation CDR :
+      1. LW $V0 4($A0)  ; charger mot 1
+    
+    Implémentation NULL :
+      1. SEQ $V0 $A0 $ZERO  ; compare à 0
+    
+    Fichiers :
+      - src/compiler.lisp : compile-cons, compile-car, compile-cdr, compile-null
+      - Tests : tests/unit/test-list-ops.lisp (20+ tests complets)
+    
+    Tests attendus :
+      ✓ (cons 1 2) → dotted pair [1|2]
+      ✓ (cons 1 nil) → liste [1]
+      ✓ (cons 1 (cons 2 nil)) → liste [1 2]
+      ✓ (car (cons 1 2)) → 1
+      ✓ (cdr (cons 1 2)) → 2
+      ✓ (null nil) → t
+      ✓ (null (cons 1 2)) → nil
+      ✓ Construction listes longues
+      ✓ Navigation car/cdr imbriqués
+    
+    Impact : Débloque PUSH/POP, DOLIST, navigation environnements
+    Estimation : 2-4 jours (complexe car allocation dynamique)
+
+[ ] 6.5 Implémenter DOLIST (1 jour)
+    Priorité : ⭐⭐⭐⭐⭐ CRITIQUE  |  Complexité : ⭐⭐⭐ Moyenne-Haute
+    
+    Dépendances : CAR, CDR, NULL (Sprint 2.4)
+    
+    Approche : Macro expansion en WHILE
+      (dolist (var list) body...)
+      →
+      (let ((temp-list list))
+        (while (not (null temp-list))
+          (let ((var (car temp-list)))
+            body...
+            (setq temp-list (cdr temp-list)))))
+    
+    Fichiers :
+      - src/compiler.lisp : compile-dolist (macro expansion complexe)
+      - Tests : tests/unit/test-dolist.lisp (12 tests)
+    
+    Tests attendus :
+      ✓ (let ((sum 0)) (dolist (x '(1 2 3)) (setq sum (+ sum x))) sum) → 6
+      ✓ (let ((acc nil)) (dolist (x '(1 2 3)) (push x acc)) acc) → (3 2 1)
+      ✓ Liste vide
+      ✓ Body multiple expressions
+      ✓ DOLIST imbriqués
+    
+    Impact : Débloque init-registers (boucle sur *register-names*)
+    Estimation : 1 jour (8h)
+
+Total Sprint 2 : 3-5 jours
+
+SPRINT 3 : STRUCTURES DE DONNÉES (3-6 jours) 🔄
+═══════════════════════════════════════════════════════════════════════════
+
+[ ] 6.6 OPTION RECOMMANDÉE : Registres en Tableau Fixe (1 jour)
+    Priorité : ⭐⭐⭐⭐⭐ CRITIQUE  |  Complexité : ⭐⭐ Moyenne
+    
+    Alternative à HASH-TABLES : Plus simple et rapide
+    
+    Approche :
+      1. Définir tableau fixe *vm-registers* de 42 éléments
+      2. Mapping symbole→index hardcodé :
+         :$ZERO → 0, :$AT → 1, :$V0 → 2, ..., :$RA → 31
+         :$PC → 32, :$SP → 33, :$FP → 34, etc.
+      3. Remplacer (gethash :$V0 regs) → (aref regs 2)
+      4. Fonction reg-index pour lookup (déjà fait dans vm-compilable.lisp ✅)
+    
+    Fichiers :
+      - src/vm-compilable.lisp : Déjà refactorisé ✅
+      - src/compiler.lisp : Support reg-index si nécessaire
+      - Tests : tests/unit/test-register-array.lisp (validation)
+    
+    Tests attendus :
+      ✓ (get-register :$V0) → accès correct
+      ✓ (set-register :$V0 42) → stockage correct
+      ✓ init-registers initialise tous les registres
+    
+    Impact : Débloque get-register, set-register, execute-instruction
+    Estimation : 1 jour (déjà fait en Phase 5 ✅, juste valider)
+
+[ ] 6.7 OPTION ALTERNATIVE : Implémenter HASH-TABLES (3-5 jours)
+    Priorité : ⭐⭐⭐⭐⭐ CRITIQUE  |  Complexité : ⭐⭐⭐⭐⭐ Très Élevée
+    
+    ⚠️ NON RECOMMANDÉ : Trop complexe pour résultat identique à 6.6
+    
+    Si implémenté quand même :
+      - Fonction de hachage pour symboles (hash string → index)
+      - Gestion collisions (chaining avec listes, nécessite CONS/CAR/CDR)
+      - Structure : [SIZE][BUCKETS...][...chains...]
+      - MAKE-HASH-TABLE, GETHASH, SETF GETHASH, REMHASH
+    
+    Estimation : 3-5 jours (vs 1 jour pour option 6.6)
+
+[ ] 6.8 Implémenter DEFSTRUCT Simplifié (2-3 jours)
+    Priorité : ⭐⭐⭐⭐⭐ CRITIQUE  |  Complexité : ⭐⭐⭐⭐ Élevée
+    
+    Note : Peut être évité si on utilise vm-compilable.lisp (déjà refactorisé ✅)
+    
+    Si implémenté pour vm.lisp original :
+      Approche :
+        1. Parser (defstruct name (slot1 val1) ...)
+        2. Générer MAKE-NAME : (defun make-name (...) (make-array n))
+        3. Générer accesseurs : (defun name-slot1 (obj) (aref obj 0))
+        4. Générer setters : (defun set-name-slot1 (obj val) (setq (aref obj 0) val))
+      
+      Représentation : Array [TYPE_TAG][SLOT0][SLOT1]...[SLOTN]
+      
+      Fichiers :
+        - src/compiler.lisp : compile-defstruct (code generation)
+        - Tests : tests/unit/test-defstruct.lisp (15+ tests)
+      
+      Tests attendus :
+        ✓ (defstruct point (x 0) (y 0))
+        ✓ (make-point) → crée array
+        ✓ (point-x p) → accès correct
+        ✓ (setf (point-x p) 10) → modification
+      
+      Impact : Débloque structure VM (mais déjà contourné ✅)
+      Estimation : 2-3 jours
+    
+    RECOMMANDATION : SKIP (utiliser vm-compilable.lisp)
+
+Total Sprint 3 : 1-3 jours (si on skip DEFSTRUCT et HASH-TABLES)
+
+SPRINT 4 : LOOP ET FEATURES AVANCÉES (1-3 jours) 🔄
+═══════════════════════════════════════════════════════════════════════════
+
+[ ] 6.9 Implémenter LOOP basique (1-2 jours)
+    Priorité : ⭐⭐⭐⭐⭐ CRITIQUE  |  Complexité : ⭐⭐⭐⭐ Élevée
+    
+    Dépendances : RETURN-FROM (déjà implémenté ✅)
+    
+    Approche : Subset minimal
+      Forme 1 : (loop (when test (return val)) ...)
+      Forme 2 : (loop ... (unless test (return val)))
+      Transformation : WHILE infini + RETURN-FROM
+    
+    Exemple :
+      (loop
+        (when done (return result))
+        ... body ...)
+      →
+      (let ((done nil) (result nil))
+        (while t
+          (when done (return-from loop-block result))
+          ... body ...))
+    
+    Fichiers :
+      - src/compiler.lisp : compile-loop (macro complexe)
+      - Tests : tests/unit/test-loop.lisp (10 tests)
+    
+    Tests attendus :
+      ✓ (let ((i 0)) (loop (when (> i 5) (return i)) (incf i))) → 6
+      ✓ Boucle infinie avec condition sortie
+      ✓ LOOP avec RETURN multiple
+    
+    Impact : Débloque run-vm (boucle principale), recherches environnement
+    Estimation : 1-2 jours
+    
+    ALTERNATIVE : Déjà transformé en WHILE dans vm-compilable.lisp ✅
+    RECOMMANDATION : SKIP (déjà fait manuellement)
+
+[ ] 6.10 Implémenter FORMAT basique (1-2 jours) - OPTIONNEL
+    Priorité : ⭐⭐⭐ Moyenne  |  Complexité : ⭐⭐⭐ Moyenne-Haute
+    
+    ⚠️ NON CRITIQUE : Debug seulement
+    
+    Subset minimal :
+      ~A : any (afficher entier)
+      ~% : newline
+      ~D : decimal (= ~A)
+    
+    Approche :
+      1. Parser format string
+      2. Pour chaque directive, générer code PRINT
+      3. Utiliser syscall PRINT_INT + PRINT_CHAR
+    
+    Fichiers :
+      - src/compiler.lisp : compile-format
+      - Tests : tests/unit/test-format.lisp
+    
+    ALTERNATIVE : Déjà supprimé dans vm-compilable.lisp ✅
+    RECOMMANDATION : SKIP
+
+[ ] 6.11 Implémenter KEYWORDS arguments (2-3 jours) - OPTIONNEL
+    Priorité : ⭐⭐⭐ Moyenne  |  Complexité : ⭐⭐⭐⭐ Élevée
+    
+    ⚠️ NON CRITIQUE : Peut utiliser args positionnels
+    
+    Approche :
+      - Parser &key dans (defun f (a &key (b 10) c) ...)
+      - Génération code pour valeurs défaut
+      - Parsing arguments lors appel
+    
+    ALTERNATIVE : Refactoriser appels avec args positionnels uniquement
+    RECOMMANDATION : SKIP (déjà fait dans vm-compilable.lisp ✅)
+
+Total Sprint 4 : 0-2 jours (si on skip LOOP/FORMAT/KEYWORDS déjà faits)
+
+════════════════════════════════════════════════════════════════════════════
+
+PLAN DE DÉVELOPPEMENT OPTIMISÉ
+
+Sprints obligatoires (constructions critiques) :
+  • Sprint 1 : WHEN/UNLESS, INCF/DECF, ERROR (1-2 jours)
+  • Sprint 2 : LIST OPS + DOLIST (3-5 jours)
+  • Sprint 3 : Registres tableau fixe (1 jour, déjà fait ✅)
+  
+  Total minimum : 5-8 jours
+
+Sprints optionnels (déjà contournés dans vm-compilable.lisp) :
+  • DEFSTRUCT : SKIP (déjà refactorisé ✅)
+  • HASH-TABLES : SKIP (remplacé par tableau ✅)
+  • LOOP : SKIP (transformé en WHILE ✅)
+  • FORMAT : SKIP (supprimé ✅)
+  • KEYWORDS : SKIP (refactorisé ✅)
+
+════════════════════════════════════════════════════════════════════════════
+
+PROCHAINES ÉTAPES IMMÉDIATES
+
+[ ] 6.12 Compiler les fonctions auxiliaires simples
     Ordre :
       1. get-value, set-value
       2. mem-read, mem-write
@@ -498,51 +866,108 @@ Statistiques :
   • Fichier vm-compilable.lisp : ~690 lignes, chargement OK
 
 ════════════════════════════════════════════════════════════════════════════
-ESTIMATION TEMPORELLE - MISE À JOUR 27 NOVEMBRE 2025 (19:45)
+ESTIMATION TEMPORELLE - MISE À JOUR 27 NOVEMBRE 2025 (20:45) - OPTION A
 ════════════════════════════════════════════════════════════════════════════
 
-                                    Estimé    Réel      Status
-Phase 1 : Analyse               2-3h      2h        ✅ TERMINÉ
-Phase 2 : Boucles (WHILE)       3-4h      2h        ✅ TERMINÉ
-Phase 3 : Arrays                2-3h      2.5h      ✅ TERMINÉ
-Phase 4 : Case                  2-3h      0h        ✅ DÉJÀ FAIT
-Phase 5 : Simplification VM     5-6h      2.5h      ✅ TERMINÉ
-Phase 6 : Compilation VM        4-5h      7.5h      🔄 EN COURS (62%→77%)
-  Session 1-3 : Extensions      -         5.5h      ✅ TERMINÉ
-  Session 4 : Bug fix           -         2h        ✅ TERMINÉ
-Phase 7 : Tests                 3-4h      -         ⏸️ À FAIRE
-Phase 8 : Documentation         2h        -         ⏸️ À FAIRE
+⚠️ NOUVELLE STRATÉGIE : OPTION A (Compilation Complète)
+
+PHASES INITIALES (TERMINÉES)                Estimé    Réel      Status
 ─────────────────────────────────────────────────────────────────────────
-TOTAL                          23-30h    16.5h     ~55% COMPLÉTÉ
-                                         (~6.5-13.5h restantes)
+Phase 1 : Analyse                           2-3h      2h        ✅ TERMINÉ
+Phase 2 : Boucles (WHILE)                   3-4h      2h        ✅ TERMINÉ
+Phase 3 : Arrays                            2-3h      2.5h      ✅ TERMINÉ
+Phase 4 : Case                              2-3h      0h        ✅ DÉJÀ FAIT
+Phase 5 : Simplification VM                 5-6h      2.5h      ✅ TERMINÉ
+Phase 6 : Compilation VM (partielle)        4-5h      9.5h      ✅ TERMINÉ
+  • Session 1-3 : Extensions                -         5.5h      ✅ TERMINÉ
+  • Session 4 : Bug fix DEFUN               -         2h        ✅ TERMINÉ
+  • Session 5 : Tests & Analyse             -         2h        ✅ TERMINÉ
+─────────────────────────────────────────────────────────────────────────
+TOTAL PHASES INITIALES                      18-24h    18.5h     ✅ 100%
 
-Temps gagné grâce aux extensions déjà implémentées et efficacité : ~8h
-  - CASE déjà supporté : -2h
-  - WHILE plus rapide que prévu : -1h
-  - Documentation déjà faite : -2h
-  - Phase 5 plus rapide que prévu (sed/scripts) : -3h
+NOUVELLE FEUILLE DE ROUTE - OPTION A        Estimé    Réel      Status
+─────────────────────────────────────────────────────────────────────────
+Sprint 1 : Constructions simples            1-2j      -         ⏸️ À FAIRE
+  • WHEN/UNLESS                             4-6h      -         [ ]
+  • INCF/DECF/PUSH/POP                      4-6h      -         [ ]
+  • ERROR → PRINT+HALT                      2-4h      -         [ ]
 
-Temps supplémentaire Phase 6 : +2.5h (debug complexe dotted pairs)
+Sprint 2 : Manipulation de listes           3-5j      -         ⏸️ À FAIRE
+  • LIST OPS (CONS/CAR/CDR/NULL)            2-4j      -         [ ]
+  • DOLIST                                  1j        -         [ ]
 
-Estimation révisée totale : 20-26h (au lieu de 25-32h)
+Sprint 3 : Structures de données            1j        -         ⏸️ À FAIRE
+  • Registres tableau fixe (déjà fait ✅)   0h        0h        ✅ SKIP
+  • DEFSTRUCT (déjà contourné ✅)           0h        0h        ✅ SKIP
+  • HASH-TABLES (déjà remplacé ✅)          0h        0h        ✅ SKIP
 
-════════════════════════════════════════════════════════════════════════════
+Sprint 4 : Features avancées (optionnel)    0-2j      -         ⏸️ SKIP
+  • LOOP (déjà transformé ✅)               0h        0h        ✅ SKIP
+  • FORMAT (déjà supprimé ✅)               0h        0h        ✅ SKIP
+  • KEYWORDS (déjà refactorisé ✅)          0h        0h        ✅ SKIP
 
-PROGRESSION GLOBALE PHASE 11 : ~55% ⏩⏩
+Phase 7 : Tests & Compilation finale        2-3j      -         ⏸️ À FAIRE
+  • Tests incrémentaux par Sprint           -         -         [ ]
+  • Compilation vm-compilable.lisp          1j        -         [ ]
+  • Tests end-to-end VM1+VM2                1j        -         [ ]
+  • Benchmarks performance                  0.5j      -         [ ]
+
+Phase 8 : Documentation                     1j        -         ⏸️ À FAIRE
+  • Documentation constructions             0.5j      -         [ ]
+  • Guides utilisateur                      0.5j      -         [ ]
+─────────────────────────────────────────────────────────────────────────
+TOTAL OPTION A (OPTIMAL)                    7-13j     -         ⏸️ 0%
+                                           (56-104h)
+
+TOTAL GÉNÉRAL (Phases initiales + Option A)
+                                           10-17j     18.5h     ⏸️ 11%
+                                          (80-136h)  (1.5-2.3j)
+
+═══════════════════════════════════════════════════════════════════════════
+
+ANALYSE DES TEMPS
+
+Temps économisés grâce aux optimisations :
+  ✅ DEFSTRUCT contourné (vm-compilable.lisp) : -5-7 jours
+  ✅ HASH-TABLES remplacé par tableau fixe : -3-5 jours
+  ✅ LOOP transformé manuellement : -1-2 jours
+  ✅ FORMAT supprimé : -1-2 jours
+  ✅ KEYWORDS refactorisés : -2-3 jours
+  
+  Total économisé : 12-19 jours 🎉
+  
+  Estimation si implémentation complète : 35 jours → 13 jours (réduction 63%)
+
+Temps réel vs estimation initiale :
+  • Estimation initiale Phase 11 : 25-32h
+  • Temps investi phases initiales : 18.5h
+  • Estimation restante Option A optimisée : 56-104h (7-13 jours)
+  • Total Option A : 74.5-122.5h (9-15 jours)
+  
+  Différence : Option A nécessite 3-5x plus de temps que prévu initialement,
+              mais reste 2-3x plus rapide que l'implémentation naïve complète
+
+═══════════════════════════════════════════════════════════════════════════
+
+PROGRESSION GLOBALE PHASE 11 (OPTION A) : ~11% ⏸️
 
 ✅ Analyse VM (100%)
 ✅ WHILE loops (100% - 10/10 tests)
 ✅ PROGN (100%)
 ✅ ARRAYS (100% - 12/12 tests)
-✅ DOLIST analyse (100% - décision: ne pas implémenter)
 ✅ VM Simplification (100% - vm-compilable.lisp créé, ~690 lignes)
-🔄 Compilation VM → MIPS (62% - bug critique résolu, LET+DEFUN fonctionne)
-⏸️ Tests VM₁ dans VM₀ (0%)
+✅ Tests & Benchmarks (100% - 5/5 tests, VM0 analysé)
+⏸️ Sprint 1 : Constructions simples (0%) - WHEN/UNLESS/INCF/ERROR
+⏸️ Sprint 2 : Listes (0%) - CONS/CAR/CDR/DOLIST
+⏸️ Sprint 3 : Structures (100% déjà fait ✅) - SKIP
+⏸️ Sprint 4 : Avancé (100% déjà fait ✅) - SKIP
+⏸️ Phase 7 : Tests finaux (0%)
+⏸️ Phase 8 : Documentation (0%)
 
-Extensions totales implémentées : 22/22 tests passing (100%)
+Extensions implémentées : 22/22 tests passing (100%)
+Constructions Lisp supportées : 8/25 (32%)
+Objectif Option A : 17/25 (68% - suffisant pour vm-compilable.lisp)
 
-BUGS CRITIQUES RÉSOLUS :
-  ✅ Dotted pairs dans compile-variable (Session 4)
-     Impact : Débloque ALLOC-MEMORY + 4-5 fonctions VM
+PROCHAINE SESSION : Sprint 1.1 - Implémenter WHEN/UNLESS (4-6h)
 
 ════════════════════════════════════════════════════════════════════════════
