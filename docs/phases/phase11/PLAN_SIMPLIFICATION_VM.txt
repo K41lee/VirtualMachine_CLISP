@@ -1,0 +1,250 @@
+═══════════════════════════════════════════════════════════════════════════════
+ PHASE 11.5 - PLAN SIMPLIFICATION VM.LISP → VM-COMPILABLE.LISP
+═══════════════════════════════════════════════════════════════════════════════
+
+Date: 27 novembre 2025
+Objectif: Créer version compilable de vm.lisp
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. STRATÉGIE GLOBALE
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ Principe ────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  Créer vm-compilable.lisp en simplifiant vm.lisp pour utiliser       │
+│  UNIQUEMENT les constructs supportés par notre compilateur:          │
+│                                                                        │
+│  ✅ Supporté:                                                         │
+│    • LET, SETQ, IF                                                    │
+│    • Arithmétique: +, -, *, <, >, =                                   │
+│    • WHILE, PROGN                                                     │
+│    • ARRAYS: make-array, aref, setf aref                             │
+│    • Fonctions: DEFUN, appels                                         │
+│                                                                        │
+│  ❌ À remplacer:                                                      │
+│    • DEFSTRUCT → Variables globales ou arrays                        │
+│    • HASH-TABLE → Arrays                                              │
+│    • DOLIST → Boucles WHILE indexées                                  │
+│    • LOOP → WHILE                                                     │
+│    • GETHASH, SETF GETHASH → AREF, SETF AREF                         │
+│    • Format complexe → Simplifié ou supprimé                          │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. TRANSFORMATIONS SPÉCIFIQUES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ 2.1 DEFSTRUCT VM → VARIABLES GLOBALES ───────────────────────────────┐
+│                                                                        │
+│  AVANT (vm.lisp):                                                     │
+│    (defstruct vm                                                      │
+│      (registers (make-hash-table :test 'eq))                         │
+│      (memory (make-array *maxmem* :initial-element 0))               │
+│      (verbose nil))                                                   │
+│                                                                        │
+│    (let ((vm (make-vm)))                                              │
+│      (vm-registers vm)                                                │
+│      (vm-memory vm))                                                  │
+│                                                                        │
+│  APRÈS (vm-compilable.lisp):                                          │
+│    ; Variables globales                                               │
+│    (defvar *vm-registers* (make-array 42 :initial-element 0))       │
+│    (defvar *vm-memory* (make-array *maxmem* :initial-element 0))    │
+│    (defvar *vm-verbose* nil)                                          │
+│                                                                        │
+│    ; Pas besoin de make-vm                                            │
+│    ; Accès directs: *vm-registers*, *vm-memory*                      │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 2.2 HASH-TABLE REGISTRES → ARRAY ────────────────────────────────────┐
+│                                                                        │
+│  AVANT:                                                                │
+│    (vm-registers vm)  → hash-table                                    │
+│    (gethash :$v0 (vm-registers vm))                                   │
+│    (setf (gethash :$v0 (vm-registers vm)) 42)                        │
+│                                                                        │
+│  APRÈS:                                                                │
+│    *vm-registers*  → array de 42 éléments                            │
+│    (aref *vm-registers* 2)        ; $v0 = registre 2                 │
+│    (setq (aref *vm-registers* 2) 42)                                 │
+│                                                                        │
+│  Mapping registres → indices:                                         │
+│    $zero=0, $at=1, $v0=2, $v1=3, $a0=4, ..., $ra=31, $pc=32, ...    │
+│    (Utiliser même ordre que *register-names*)                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 2.3 DOLIST → WHILE INDEXÉ ───────────────────────────────────────────┐
+│                                                                        │
+│  CAS 1: init-registers                                                │
+│                                                                        │
+│  AVANT:                                                                │
+│    (dolist (reg *register-names*)                                     │
+│      (setf (gethash reg (vm-registers vm)) 0))                       │
+│                                                                        │
+│  APRÈS:                                                                │
+│    (let ((i 0))                                                       │
+│      (while (< i 42)                                                  │
+│        (progn                                                          │
+│          (setq (aref *vm-registers* i) 0)                            │
+│          (setq i (+ i 1)))))                                          │
+│                                                                        │
+│  CAS 2: dump-registers                                                │
+│                                                                        │
+│  AVANT:                                                                │
+│    (dolist (reg *register-names*)                                     │
+│      (format t "~6A: ~A~%" reg (get-register vm reg)))               │
+│                                                                        │
+│  APRÈS:                                                                │
+│    ; Simplement supprimer ou commenter                                │
+│    ; (pas critique pour la VM compilée)                               │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 2.4 LOOP → WHILE ────────────────────────────────────────────────────┐
+│                                                                        │
+│  Rechercher toutes les formes LOOP dans vm.lisp et les transformer   │
+│  en boucles WHILE équivalentes.                                       │
+│                                                                        │
+│  Exemple commun:                                                       │
+│    (loop while condition do body)                                     │
+│    → (while condition body)                                           │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 2.5 FORMAT → Suppression ────────────────────────────────────────────┐
+│                                                                        │
+│  FORMAT n'est pas supporté par le compilateur.                       │
+│                                                                        │
+│  Options:                                                              │
+│    1. Supprimer tous les format t (affichage debug)                  │
+│    2. Garder uniquement pour version originale                        │
+│    3. Remplacer par version minimaliste si critique                   │
+│                                                                        │
+│  Recommandation: Supprimer, pas critique pour VM compilée            │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. PLAN D'EXÉCUTION ÉTAPE PAR ÉTAPE
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ Étape 1: Analyse vm.lisp (30min) ────────────────────────────────────┐
+│                                                                        │
+│  ☐ Identifier toutes les utilisations de DEFSTRUCT                   │
+│  ☐ Identifier tous les HASH-TABLE                                     │
+│  ☐ Identifier tous les DOLIST                                         │
+│  ☐ Identifier tous les LOOP                                           │
+│  ☐ Identifier tous les FORMAT                                         │
+│  ☐ Créer liste de transformations nécessaires                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 2: Créer squelette vm-compilable.lisp (30min) ─────────────────┐
+│                                                                        │
+│  ☐ Copier vm.lisp → src/vm-compilable.lisp                           │
+│  ☐ Ajouter header de documentation                                    │
+│  ☐ Créer section "Variables globales"                                 │
+│  ☐ Définir *vm-registers* array                                       │
+│  ☐ Définir *vm-memory* array                                          │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 3: Transformer DEFSTRUCT (1h) ─────────────────────────────────┐
+│                                                                        │
+│  ☐ Remplacer defstruct vm par variables globales                     │
+│  ☐ Remplacer make-vm par init-vm-globals                             │
+│  ☐ Remplacer (vm-registers vm) par *vm-registers*                    │
+│  ☐ Remplacer (vm-memory vm) par *vm-memory*                          │
+│  ☐ Supprimer paramètre vm de toutes les fonctions                    │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 4: Transformer HASH-TABLE → ARRAY (1h) ────────────────────────┐
+│                                                                        │
+│  ☐ Remplacer (gethash reg ...) par (aref *vm-registers* idx)        │
+│  ☐ Remplacer (setf (gethash reg ...) val) par (setq (aref ...) val) │
+│  ☐ Créer fonctions helper: reg-name→index                            │
+│  ☐ Tester accès registres                                             │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 5: Transformer DOLIST → WHILE (45min) ─────────────────────────┐
+│                                                                        │
+│  ☐ init-registers: remplacer dolist par while i < 42                 │
+│  ☐ dump-registers: commenter ou supprimer                            │
+│  ☐ Vérifier autres dolist éventuels                                  │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 6: Transformer LOOP → WHILE (30min) ───────────────────────────┐
+│                                                                        │
+│  ☐ Identifier tous les loop                                           │
+│  ☐ Transformer en while équivalent                                    │
+│  ☐ Tester logique identique                                           │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 7: Nettoyer FORMAT et debug (30min) ───────────────────────────┐
+│                                                                        │
+│  ☐ Supprimer tous les format t                                        │
+│  ☐ Supprimer paramètres :verbose                                      │
+│  ☐ Nettoyer imports inutiles                                          │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Étape 8: Vérification et tests (1h) ─────────────────────────────────┐
+│                                                                        │
+│  ☐ Vérifier syntaxe (load "src/vm-compilable.lisp")                 │
+│  ☐ Compiler quelques fonctions de test                               │
+│  ☐ Vérifier pas d'erreurs de compilation                             │
+│  ☐ Documenter changements dans SIMPLIFICATION_VM.txt                 │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. ESTIMATION TEMPS
+═══════════════════════════════════════════════════════════════════════════════
+
+Étape 1: Analyse                    30min
+Étape 2: Squelette                  30min
+Étape 3: DEFSTRUCT                  1h
+Étape 4: HASH-TABLE                 1h
+Étape 5: DOLIST                     45min
+Étape 6: LOOP                       30min
+Étape 7: FORMAT                     30min
+Étape 8: Vérification               1h
+────────────────────────────────────────
+TOTAL:                              5h 45min
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. RISQUES ET ALTERNATIVES
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ Risque 1: Trop de modifications ─────────────────────────────────────┐
+│                                                                        │
+│  Si vm.lisp est trop complexe à simplifier:                          │
+│  → Créer mini-vm.lisp avec seulement 10 instructions essentielles   │
+│  → Compiler mini-vm d'abord pour valider l'approche                 │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Risque 2: Constructs manquants ──────────────────────────────────────┐
+│                                                                        │
+│  Si d'autres constructs LISP sont nécessaires:                       │
+│  → Les documenter dans CONSTRUCTS_MANQUANTS.txt                      │
+│  → Implémenter si critiques, sinon contourner                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. LIVRABLES
+═══════════════════════════════════════════════════════════════════════════════
+
+☐ src/vm-compilable.lisp              Version simplifiée de la VM
+☐ docs/phases/phase11/SIMPLIFICATION_VM.txt   Documentation transformations
+☐ tests/test-vm-compilable.lisp       Tests de base (optionnel)
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,260 @@
+═══════════════════════════════════════════════════════════════════════════════
+ ANALYSE VM.LISP - CONSTRUCTS À TRANSFORMER
+═══════════════════════════════════════════════════════════════════════════════
+
+Date: 27 novembre 2025
+Fichier analysé: src/vm.lisp (687 lignes)
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. DEFSTRUCT VM
+═══════════════════════════════════════════════════════════════════════════════
+
+Ligne 37-48: Une seule définition
+
+(defstruct vm
+  "Structure représentant la machine virtuelle"
+  (memory (make-array *maxmem* :initial-element 0)
+          :type (simple-array t (*)))
+  (registers (make-hash-table :test 'eq)
+             :type hash-table)
+  (state :ready
+         :type keyword)
+  (instruction-count 0
+                     :type integer)
+  (verbose nil
+           :type boolean))
+
+TRANSFORMATION:
+  → Remplacer par variables globales:
+    (defvar *vm-memory* (make-array *maxmem* :initial-element 0))
+    (defvar *vm-registers* (make-array 42 :initial-element 0))
+    (defvar *vm-state* :ready)
+    (defvar *vm-instruction-count* 0)
+    (defvar *vm-verbose* nil)  ; À SUPPRIMER (pas nécessaire)
+
+IMPACT:
+  • Supprimer toutes les fonctions vm-memory, vm-registers, vm-state, etc.
+  • Supprimer paramètre (vm) de toutes les fonctions
+  • Accès directs aux variables globales
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. HASH-TABLE (REGISTRES)
+═══════════════════════════════════════════════════════════════════════════════
+
+Utilisations:
+
+Ligne 41: (make-hash-table :test 'eq)
+  → Création dans defstruct
+
+Ligne 64: (setf (gethash reg (vm-registers vm)) 0)
+  → Initialisation dans init-registers
+
+Ligne 121: (gethash mapped-reg (vm-registers vm))
+  → Lecture dans get-register
+
+Ligne 128: (setf (gethash mapped-reg (vm-registers vm)) value)
+  → Écriture dans set-register
+
+TRANSFORMATION:
+  • Hash-table → Array de 42 éléments
+  • Mapping: nom registre → index numérique
+    :$zero → 0, $at → 1, $v0 → 2, ..., $ra → 31, $pc → 32, ...
+  
+  • (gethash :$v0 hash) → (aref *vm-registers* 2)
+  • (setf (gethash :$v0 hash) val) → (setq (aref *vm-registers* 2) val)
+
+HELPER NÉCESSAIRE:
+  (defun reg-index (reg-symbol)
+    "Retourne l'index du registre dans le tableau"
+    (case reg-symbol
+      (:$zero 0) (:$at 1) (:$v0 2) (:$v1 3)
+      (:$a0 4) (:$a1 5) (:$a2 6) (:$a3 7)
+      ...
+      (:$ra 31) (:$pc 32) ...))
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. DOLIST
+═══════════════════════════════════════════════════════════════════════════════
+
+Utilisations:
+
+Ligne 63-64: init-registers
+  (dolist (reg *register-names*)
+    (setf (gethash reg (vm-registers vm)) 0))
+
+TRANSFORMATION:
+  (let ((i 0))
+    (while (< i 42)
+      (progn
+        (setq (aref *vm-registers* i) 0)
+        (setq i (+ i 1)))))
+
+─────────────────────────────────────────────────────────────────────────────
+
+Ligne 133-134: dump-registers
+  (dolist (reg *register-names*)
+    (format t "~6A: ~A~%" reg (get-register vm reg)))
+
+TRANSFORMATION:
+  → SUPPRIMER (debug uniquement, pas critique)
+  OU:
+  (let ((i 0))
+    (while (< i 42)
+      (progn
+        ; Affichage minimal ou commentaire
+        (setq i (+ i 1)))))
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. LOOP
+═══════════════════════════════════════════════════════════════════════════════
+
+Utilisation 1 - Ligne 167-170: dump-memory
+  (loop for addr from start to (min end (1- *maxmem*))
+        for value = (aref (vm-memory vm) addr)
+        do (format t "~6A: ~A~%" addr value))
+
+TRANSFORMATION:
+  (let ((addr start)
+        (end-addr (min end (- *maxmem* 1))))
+    (while (<= addr end-addr)
+      (progn
+        (let ((value (aref *vm-memory* addr)))
+          ; format à supprimer ou simplifier
+          )
+        (setq addr (+ addr 1)))))
+
+─────────────────────────────────────────────────────────────────────────────
+
+Utilisation 2 - Ligne 213-217: dump-stack
+  (loop for i from 1 to depth
+        for addr = (+ sp i)
+        for value = (aref (vm-memory vm) addr)
+        do (format t "$sp+~A (~6A): ~A~%" i addr value))
+
+TRANSFORMATION:
+  (let ((i 1))
+    (while (<= i depth)
+      (progn
+        (let ((addr (+ sp i))
+              (value (aref *vm-memory* addr)))
+          ; format à supprimer
+          )
+        (setq i (+ i 1)))))
+
+─────────────────────────────────────────────────────────────────────────────
+
+Utilisation 3 - Ligne 655: run-vm (boucle principale)
+  (loop while (eq (vm-state vm) :running)
+        do (execute-instruction vm))
+
+TRANSFORMATION:
+  (while (= *vm-state* 1)  ; 1 = :running
+    (execute-instruction))
+
+Note: Transformer :running, :halted, :ready en constantes numériques:
+  :ready → 0
+  :running → 1
+  :halted → 2
+  :error → 3
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. FORMAT (DEBUG/AFFICHAGE)
+═══════════════════════════════════════════════════════════════════════════════
+
+FORMAT utilisé ~40 fois dans le fichier pour:
+  • Affichage debug (malloc, push, pop)
+  • Dump registres/mémoire/pile
+  • Traces d'exécution (verbose)
+  • Messages d'erreur
+
+STRATÉGIE:
+  ✅ SUPPRIMER TOUS LES FORMAT
+    Raison: Pas supporté par le compilateur, pas critique pour VM compilée
+  
+  Alternative (si absolument nécessaire):
+    • Garder version originale vm.lisp pour debug
+    • vm-compilable.lisp = version sans affichage
+
+IMPACT: -40 lignes de format, code plus simple
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. AUTRES CONSTRUCTS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ CASE (utilisé massivement dans execute-instruction) ─────────────────┐
+│                                                                        │
+│  Le CASE est déjà supporté par le compilateur ✅                      │
+│  Pas de transformation nécessaire                                     │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ ERROR ────────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  (error "message") utilisé pour les erreurs                           │
+│  → Transformer en (setq *vm-state* 3) ; 3 = error                    │
+│  → Ou implémenter fonction d'erreur simple                            │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ EQ, NULL ─────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  (eq a b) → (= a b) pour nombres/symboles transformés                │
+│  (null x) → (= x 0) si x transformé en nombre                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ KEYWORDS (:ready, :running, etc.) ────────────────────────────────────┐
+│                                                                        │
+│  Transformer en constantes numériques:                                │
+│    (defconstant +state-ready+ 0)                                      │
+│    (defconstant +state-running+ 1)                                    │
+│    (defconstant +state-halted+ 2)                                     │
+│    (defconstant +state-error+ 3)                                      │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. RÉSUMÉ DES TRANSFORMATIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌───────────────────┬──────────────┬─────────────────────────────────────┐
+│ Construct         │ Occurrences  │ Transformation                      │
+├───────────────────┼──────────────┼─────────────────────────────────────┤
+│ DEFSTRUCT         │ 1            │ Variables globales                  │
+│ HASH-TABLE        │ 4 usages     │ Array + helper reg-index            │
+│ DOLIST            │ 2            │ WHILE indexé                        │
+│ LOOP              │ 3            │ WHILE avec compteur/condition       │
+│ FORMAT            │ ~40          │ SUPPRIMER tous                      │
+│ KEYWORDS          │ ~10          │ Constantes numériques               │
+│ ERROR             │ ~5           │ setq *vm-state* +state-error+       │
+└───────────────────┴──────────────┴─────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. ORDRE DE TRANSFORMATION RECOMMANDÉ
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Copier vm.lisp → vm-compilable.lisp
+2. Définir constantes d'état (ready/running/halted/error)
+3. Définir variables globales (*vm-memory*, *vm-registers*, etc.)
+4. Créer helper reg-index
+5. Supprimer DEFSTRUCT et accesseurs
+6. Remplacer vm-memory → *vm-memory*
+7. Remplacer gethash → aref avec reg-index
+8. Transformer DOLIST → WHILE
+9. Transformer LOOP → WHILE
+10. Supprimer tous les FORMAT
+11. Remplacer keywords par constantes
+12. Remplacer ERROR par setq *vm-state*
+13. Supprimer paramètre (vm) de toutes les fonctions
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. ESTIMATION
+═══════════════════════════════════════════════════════════════════════════════
+
+  ✅ Analyse:                        FAIT
+  ⏱️  Implémentation:                 4-5h
+  ⏱️  Tests:                          1h
+  ───────────────────────────────────────
+  Total:                             5-6h
+
+═══════════════════════════════════════════════════════════════════════════════

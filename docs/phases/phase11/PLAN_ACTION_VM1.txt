@@ -3,8 +3,8 @@
 ║                     Compiler VM en MIPS                                    ║
 ╚════════════════════════════════════════════════════════════════════════════╝
 
-Date: 27 novembre 2025
-Durée estimée: 30-36 heures
+Date: 27 novembre 2025 - Mise à jour après implémentation ARRAYS
+Durée estimée: 25-32 heures (réduit grâce aux extensions déjà implémentées)
 
 ════════════════════════════════════════════════════════════════════════════
 ARCHITECTURE CLARIFIÉE
@@ -49,163 +49,260 @@ Note: Les fichiers bootstrap ne sont PAS nécessaires pour Phase 11
       Ils sont gardés pour historique Phase 10 uniquement
 
 ════════════════════════════════════════════════════════════════════════════
-PHASE 1 : ANALYSE src/vm.lisp (2-3h)
+PHASE 1 : ANALYSE src/vm.lisp ✅ TERMINÉ (2h)
 ════════════════════════════════════════════════════════════════════════════
 
-[ ] 1.1 Lister toutes les fonctions de vm.lisp
-    À analyser : 686 lignes
-    Fonctions principales :
-      - make-new-vm, initialize-vm
-      - get-register, set-register
-      - mem-read, mem-write
-      - get-value, set-value
-      - execute-instruction (gros case avec 40+ opcodes)
-      - run-vm (boucle principale)
+[✅] 1.1 Lister toutes les fonctions de vm.lisp
+    Analysé : 687 lignes
+    Résultat : 35 fonctions identifiées
+    Fichier : docs/phases/phase11/ANALYSE_VM_CONSTRUCTS.txt
 
-[ ] 1.2 Identifier les constructions LISP utilisées
-    À vérifier :
-      - Defstruct (vm) → À remplacer par variables globales
-      - Hash-table (registers) → À remplacer par array
-      - Case (execute-instruction) → OK si on l'implémente
-      - Loop/dotimes → À vérifier
-      - Format/print → Ignorer (debug seulement)
+[✅] 1.2 Identifier les constructions LISP utilisées
+    Résultats détaillés dans : docs/phases/phase11/ANALYSE_TRANSFORMATIONS_VM.txt
+    Trouvé :
+      - DEFSTRUCT (vm) : 1 occurrence → Variables globales
+      - HASH-TABLE : 4 usages → Arrays avec indices
+      - DOLIST : 2 occurrences → WHILE indexé
+      - LOOP : 3 occurrences → WHILE
+      - FORMAT : ~40 occurrences → Suppression
+      - CASE : OK (déjà supporté)
 
-[ ] 1.3 Créer une liste de dépendances
-    Fichier : vm1-compilation/ANALYSE_VM.txt
-
-════════════════════════════════════════════════════════════════════════════
-PHASE 2 : BOUCLES (3-4h)
-════════════════════════════════════════════════════════════════════════════
-
-[ ] 2.1 Implémenter LOOP dans le compilateur
-    Fichier : vm1-compilation/extensions/compile-loop.lisp
+[✅] 1.3 Créer une liste de dépendances
+    Fichiers créés :
+      - docs/phases/phase11/ANALYSE_VM_CONSTRUCTS.txt
+      - docs/phases/phase11/ANALYSE_TRANSFORMATIONS_VM.txt
+      - docs/phases/phase11/PLAN_SIMPLIFICATION_VM.txt
     
-    Syntaxe :
-      (loop while condition do body)
+    Extensions critiques identifiées :
+      ✅ WHILE loops (implémenté - 10/10 tests)
+      ✅ PROGN sequences (implémenté)
+      ✅ ARRAYS (implémenté - 12/12 tests)
+      ⏸️ DOLIST (ne sera PAS implémenté - voir stratégie alternative)
+      ✅ CASE (déjà supporté dans compilateur)
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 2 : BOUCLES ✅ TERMINÉ (2h)
+════════════════════════════════════════════════════════════════════════════
+
+[✅] 2.1 Implémenter WHILE dans le compilateur
+    Fichier : src/compiler.lisp (fonction compile-while, ligne ~1220)
+    Documentation : src/compiler-extensions/compile-while.lisp
+    
+    Syntaxe implémentée :
+      (while condition body...)
     
     Génération MIPS :
-      LOOP_START:
+      WHILE_START:
         ; évaluer condition → $V0
-        BEQ $V0 $ZERO LOOP_END
-        ; exécuter body
-        J LOOP_START
-      LOOP_END:
+        BEQ $V0 $ZERO WHILE_END
+        ; exécuter body (avec PROGN si multiple)
+        J WHILE_START
+      WHILE_END:
+        MOVE $ZERO $V0  ; retourne NIL
     
-    Tests :
-      [ ] Boucle simple : (loop while (> x 0) do (setq x (- x 1)))
-      [ ] Avec calculs complexes
-      [ ] Boucles imbriquées
+    Tests : tests/unit/test-while.lisp
+      [✅] Boucle simple compteur
+      [✅] Accumulation valeurs
+      [✅] Condition fausse initialement
+      [✅] Condition nil
+      [✅] Multi-instructions dans body
+      [✅] Boucles imbriquées
+      [✅] Calcul factorielle
+      [✅] Conditions AND
+      [✅] Double condition
+      [✅] Retourne nil
+    
+    Résultat : 10/10 tests passent ✅
 
-[ ] 2.2 Intégrer LOOP dans src/compiler.lisp
-    Ajouter clause dans compile-expr
+[✅] 2.2 Intégrer WHILE dans src/compiler.lisp
+    Ajouté clause (:while ...) dans compile-expr (ligne ~1916)
+    Parser WHILE ajouté (ligne ~295)
+
+[✅] 2.3 BONUS : Implémenter PROGN
+    Nécessaire pour body WHILE avec plusieurs expressions
+    Fonction compile-progn ajoutée (ligne ~1283)
+    Parser PROGN ajouté (ligne ~303)
+    Tests : Intégrés dans test-while.lisp
+
+Note: LOOP de Common Lisp sera transformé en WHILE dans vm-compilable.lisp
 
 ════════════════════════════════════════════════════════════════════════════
-PHASE 3 : ARRAYS (2-3h)
+PHASE 3 : ARRAYS ✅ TERMINÉ (2h30)
 ════════════════════════════════════════════════════════════════════════════
 
-[ ] 3.1 Implémenter ARRAYS
-    Fichier : vm1-compilation/extensions/compile-arrays.lisp
+[✅] 3.1 Implémenter ARRAYS
+    Fichiers :
+      - src/compiler.lisp : Fonctions compile-make-array (ligne ~1307),
+                           compile-aref (ligne ~1405),
+                           compile-setf-aref (ligne ~1426)
+      - Documentation : src/compiler-extensions/compile-arrays.lisp (450 lignes)
     
-    Fonctions :
-      (make-array size)           → Allouer sur le tas
-      (aref array index)          → Lecture
-      (setf (aref array index) v) → Écriture
+    Fonctions implémentées :
+      (make-array size [:initial-element value]) → Allocation tas avec $gp
+      (aref array index)                         → Lecture élément
+      (setf (aref array index) value)           → Écriture élément
     
     Implémentation MIPS :
       make-array :
-        - Allouer (size+1) mots sur le tas (via malloc)
-        - Mot 0 = size
-        - Retourner adresse (dans $V0)
+        - Structure : [MAGIC(0xA88A)][SIZE][elem0][elem1]...[elemN]
+        - Allouer (2 + size) mots avec $gp (Global Pointer)
+        - Initialisation optionnelle avec boucle WHILE
+        - Retourne adresse de base dans $V0
       
       aref :
-        - Charger adresse array
-        - Calculer offset = (index+1) * 4
-        - LW value à (array + offset)
+        - Calculer offset = index + 2 (pour header)
+        - Adresse effective = base + offset
+        - LW value de l'adresse (offset 0)
       
       setf aref :
-        - Calculer adresse cible
-        - SW value à adresse
+        - Même calcul d'adresse
+        - SW value à l'adresse
+        - Retourne value (comportement SETF)
 
-    Tests :
-      [ ] Créer array, lire/écrire
-      [ ] Array de taille variable
-      [ ] Parcourir array en boucle
-
-[ ] 3.2 Intégrer dans src/compiler.lisp
-
-════════════════════════════════════════════════════════════════════════════
-PHASE 4 : CASE (2-3h)
-════════════════════════════════════════════════════════════════════════════
-
-[ ] 4.1 Implémenter CASE
-    Fichier : vm1-compilation/extensions/compile-case.lisp
+    Tests : tests/unit/test-arrays.lisp (155 lignes)
+      [✅] Créer array de taille 5
+      [✅] Lire élément par défaut (sans init)
+      [✅] Créer avec :initial-element 42
+      [✅] Lire différents indices (init 99)
+      [✅] Écrire avec setf aref
+      [✅] Écrire index 3, lire index 3
+      [✅] Éléments indépendants
+      [✅] Boucle WHILE remplissage array
+      [✅] Accumuler valeurs array avec WHILE
+      [✅] Array avec calculs (carrés)
+      [✅] Créer plusieurs arrays indépendants
+      [✅] SETF AREF retourne la valeur assignée
     
-    Syntaxe :
+    Résultat : 12/12 tests passent ✅
+
+[✅] 3.2 Intégrer dans src/compiler.lisp
+    - Parser make-array ajouté (ligne ~307)
+    - Parser aref ajouté (ligne ~314)
+    - Parser setf aref ajouté (ligne ~330, détection dans case setq)
+    - Clauses compile-expr : :make-array (ligne ~1930), :aref (ligne ~1933),
+                            :setf-aref (ligne ~1942)
+    - Registres t4-t7 ajoutés (ligne 15-18)
+    - Support $gp dans get-reg (src/asm-ops.lisp, ligne 139)
+
+    Code ajouté : +234 lignes dans src/compiler.lisp
+                 +1 ligne dans src/asm-ops.lisp
+
+Documentation complète : docs/phases/phase11/IMPLEMENTATION_ARRAYS.txt
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 4 : CASE ✅ DÉJÀ SUPPORTÉ
+════════════════════════════════════════════════════════════════════════════
+
+[✅] 4.1 CASE déjà implémenté
+    Le compilateur supporte déjà CASE depuis les phases précédentes
+    Fichier : src/compiler.lisp
+    
+    Syntaxe supportée :
       (case expr
         (val1 body1)
         (val2 body2)
         (t default))
     
-    Génération MIPS :
-      ; évaluer expr → $V0
-      LI val1 $T0
-      BEQ $V0 $T0 CASE_1
-      LI val2 $T0
-      BEQ $V0 $T0 CASE_2
-      J CASE_DEFAULT
-      CASE_1:
-        ; body1
-        J CASE_END
-      CASE_2:
-        ; body2
-        J CASE_END
-      CASE_DEFAULT:
-        ; default
-      CASE_END:
+    Implémentation :
+      - Parser dans parse-lisp-expr
+      - Fonction compile-case existante
+      - Génère des labels et branches BEQ pour chaque cas
+      - Support du cas default avec (t ...)
 
-    Tests :
-      [ ] Case avec 2-3 valeurs
-      [ ] Case avec default
-      [ ] Case imbriqués
+[✅] 4.2 Déjà intégré dans src/compiler.lisp
+    Clause (:case ...) présente dans compile-expr
 
-[ ] 4.2 Intégrer dans src/compiler.lisp
+Note : CASE est utilisé massivement dans execute-instruction de vm.lisp
+       pour dispatcher les 40+ opcodes. Pas de modifications nécessaires.
 
 ════════════════════════════════════════════════════════════════════════════
-PHASE 5 : SIMPLIFIER DEFSTRUCT ET HASH-TABLES (3-4h)
+PHASE 5 : SIMPLIFIER DEFSTRUCT ET HASH-TABLES 🔄 EN COURS (5-6h estimé)
 ════════════════════════════════════════════════════════════════════════════
+
+[✅] 5.0 Analyse et planification
+    Fichiers créés :
+      - docs/phases/phase11/PLAN_SIMPLIFICATION_VM.txt
+      - docs/phases/phase11/ANALYSE_TRANSFORMATIONS_VM.txt
+      - src/compiler-extensions/compile-dolist.lisp (stratégie alternative)
+    
+    Transformations identifiées :
+      • DEFSTRUCT → Variables globales (1 occurrence)
+      • HASH-TABLE → Arrays avec indices (4 usages)
+      • DOLIST → WHILE indexé (2 occurrences)
+      • LOOP → WHILE (3 occurrences)
+      • FORMAT → Suppression (~40 occurrences)
+      • Keywords → Constantes numériques
+    
+    Estimation revue : 5h45
 
 [ ] 5.1 Créer src/vm-compilable.lisp
-    Copie de src/vm.lisp avec simplifications :
+    Copie de src/vm.lisp (687 lignes) avec simplifications :
     
-    Changements :
+    Étape 1 : Définir constantes et variables globales
+      - Constantes d'état : +state-ready+ (0), +state-running+ (1),
+                           +state-halted+ (2), +state-error+ (3)
+      - Variables globales :
+        * (defvar *vm-memory* (make-array *maxmem* :initial-element 0))
+        * (defvar *vm-registers* (make-array 42 :initial-element 0))
+        * (defvar *vm-state* +state-ready+)
+        * (defvar *vm-instruction-count* 0)
+    
+    Étape 2 : Supprimer DEFSTRUCT et accesseurs
       - Supprimer (defstruct vm ...)
-      - Remplacer par variables globales :
-        * *vm-memory* (array)
-        * *vm-state* (variable)
-        * *vm-pc* (variable)
-        * *vm-instruction-count* (variable)
-      
-      - Remplacer hash-table registers par array :
-        * *vm-registers* (array de 40 éléments)
-        * Indexation : :$V0 → 0, :$V1 → 1, etc.
-      
-      - Simplifier fonctions :
-        * (vm-memory vm) → *vm-memory*
-        * (get-register vm :$V0) → (aref *vm-registers* 0)
-
-[ ] 5.2 Encoder opcodes comme entiers
-    Au lieu de : (:ADD src1 src2 dest)
-    Utiliser   : (1 src1 src2 dest)
+      - Supprimer fonctions vm-memory, vm-registers, vm-state, etc.
+      - Supprimer paramètre (vm) de toutes les fonctions
     
-    Table : vm1-compilation/OPCODE_TABLE.txt
-      1 = ADD
-      2 = SUB
-      3 = MUL
-      ...
-      99 = HALT
+    Étape 3 : Remplacer HASH-TABLE par ARRAY
+      - Créer fonction helper (defun reg-index (reg-symbol) ...)
+        Mapping : :$zero→0, :$at→1, :$v0→2, ..., :$ra→31, :$pc→32, ...
+      - Remplacer (gethash reg hash) par (aref *vm-registers* (reg-index reg))
+      - Remplacer (setf (gethash ...) val) par (setq (aref ...) val)
+    
+    Étape 4 : Transformer DOLIST (2 occurrences)
+      init-registers (ligne 63) :
+        AVANT : (dolist (reg *register-names*) (setf (gethash reg ...) 0))
+        APRÈS : (let ((i 0))
+                  (while (< i 42)
+                    (progn (setq (aref *vm-registers* i) 0)
+                           (setq i (+ i 1)))))
+      
+      dump-registers (ligne 133) : SUPPRIMER (debug uniquement)
+    
+    Étape 5 : Transformer LOOP (3 occurrences)
+      dump-memory (ligne 167) : SUPPRIMER ou simplifier
+      dump-stack (ligne 213) : SUPPRIMER ou simplifier
+      run-vm (ligne 655) :
+        AVANT : (loop while (eq (vm-state vm) :running) do ...)
+        APRÈS : (while (= *vm-state* +state-running+) ...)
+    
+    Étape 6 : Supprimer FORMAT (~40 occurrences)
+      - Supprimer tous les (format t ...) : debug uniquement
+      - Garder version originale vm.lisp pour debug si nécessaire
+    
+    Étape 7 : Remplacer keywords par constantes
+      - :ready → +state-ready+ (0)
+      - :running → +state-running+ (1)
+      - :halted → +state-halted+ (2)
+      - :error → +state-error+ (3)
+
+[ ] 5.2 Remplacer ERROR par gestion d'état
+    AVANT : (error "message")
+    APRÈS : (setq *vm-state* +state-error+)
+    
+    Optionnel : Stocker code erreur dans variable globale
 
 [ ] 5.3 Tester vm-compilable.lisp en LISP natif
-    Tous les tests doivent passer
+    Charger : (load "src/vm-compilable.lisp")
+    Vérifier : Pas d'erreurs de syntaxe
+    Tester : Exécuter quelques programmes simples
+    
+    Tests de base :
+      [ ] (+ 2 3) → 5
+      [ ] (let ((x 10)) (* x 2)) → 20
+      [ ] Boucle simple
+
+Note : Les opcodes restent des keywords (:ADD, :SUB, etc.) car déjà
+       supportés par CASE. Pas besoin de les encoder en entiers.
 
 ════════════════════════════════════════════════════════════════════════════
 PHASE 6 : COMPILATION VM (4-5h)
@@ -307,32 +404,65 @@ PHASE 8 : DOCUMENTATION (2h)
 RÉSUMÉ DES EXTENSIONS NÉCESSAIRES
 ════════════════════════════════════════════════════════════════════════════
 
-Compilateur doit supporter :
-  ✅ Déjà fait : +, -, *, /, if, let, setq, comparaisons, fonctions
-  [ ] LOOP/WHILE (Phase 2)
-  [ ] ARRAYS (make-array, aref, setf aref) (Phase 3)
-  [ ] CASE (Phase 4)
+Compilateur - Extensions supportées :
+  ✅ Arithmétique : +, -, *, /, <, >, =, <=, >=
+  ✅ Contrôle : if, let, setq
+  ✅ Fonctions : defun, appels, récursion
+  ✅ WHILE loops (Phase 2) - 10/10 tests passent
+  ✅ PROGN sequences (Phase 2 bonus)
+  ✅ ARRAYS : make-array, aref, setf aref (Phase 3) - 12/12 tests passent
+  ✅ CASE (déjà supporté depuis phases précédentes)
+  ✅ CLOSURES (Phase 9)
+  ✅ LABELS (fonctions locales)
 
-VM doit être simplifiée :
-  [ ] Defstruct → Variables globales (Phase 5)
-  [ ] Hash-table → Array (Phase 5)
-  [ ] Opcodes → Entiers (Phase 5)
+VM - Simplifications à faire :
+  🔄 Defstruct → Variables globales (Phase 5 en cours)
+  🔄 Hash-table → Array (Phase 5 en cours)
+  🔄 DOLIST → WHILE indexé (Phase 5 en cours)
+  🔄 LOOP → WHILE (Phase 5 en cours)
+  🔄 FORMAT → Suppression (Phase 5 en cours)
+  🔄 Keywords → Constantes numériques (Phase 5 en cours)
+
+Statistiques :
+  • Lignes de code ajoutées pour ARRAYS : +234 (compiler) +450 (doc) +155 (tests)
+  • Lignes de code ajoutées pour WHILE : ~80 (compiler) +165 (tests)
+  • Tests passant : 22/22 (10 WHILE + 12 ARRAYS) = 100%
 
 ════════════════════════════════════════════════════════════════════════════
-ESTIMATION TEMPORELLE
+ESTIMATION TEMPORELLE - MISE À JOUR 27 NOVEMBRE 2025
 ════════════════════════════════════════════════════════════════════════════
 
-Phase 1 : Analyse              2-3h
-Phase 2 : Boucles              3-4h
-Phase 3 : Arrays               2-3h
-Phase 4 : Case                 2-3h
-Phase 5 : Simplification VM    3-4h
-Phase 6 : Compilation VM       4-5h
-Phase 7 : Tests                3-4h
-Phase 8 : Documentation        2h
-────────────────────────────────────
-TOTAL                         21-28h
+                                    Estimé    Réel      Status
+Phase 1 : Analyse               2-3h      2h        ✅ TERMINÉ
+Phase 2 : Boucles (WHILE)       3-4h      2h        ✅ TERMINÉ
+Phase 3 : Arrays                2-3h      2.5h      ✅ TERMINÉ
+Phase 4 : Case                  2-3h      0h        ✅ DÉJÀ FAIT
+Phase 5 : Simplification VM     3-4h      -         🔄 EN COURS
+Phase 6 : Compilation VM        4-5h      -         ⏸️ À FAIRE
+Phase 7 : Tests                 3-4h      -         ⏸️ À FAIRE
+Phase 8 : Documentation         2h        -         ⏸️ À FAIRE
+─────────────────────────────────────────────────────────────────────────
+TOTAL                          21-28h    6.5h      30% COMPLÉTÉ
+                                         (~19h restantes)
 
-Avec imprévus : 25-32h
+Temps gagné grâce aux extensions déjà implémentées : ~5h
+  - CASE déjà supporté : -2h
+  - WHILE plus rapide que prévu : -1h
+  - Documentation déjà faite : -2h
+
+Estimation révisée totale : 20-25h (au lieu de 25-32h)
+
+════════════════════════════════════════════════════════════════════════════
+
+PROGRESSION GLOBALE PHASE 11 : 50%
+
+✅ Analyse VM (100%)
+✅ WHILE loops (100% - 10/10 tests)
+✅ PROGN (100%)
+✅ ARRAYS (100% - 12/12 tests)
+✅ DOLIST analyse (100% - décision: ne pas implémenter)
+🔄 VM Simplification (20% - planning et analyse faits)
+⏸️ Compilation VM → MIPS (0%)
+⏸️ Tests VM₁ dans VM₀ (0%)
 
 ════════════════════════════════════════════════════════════════════════════
