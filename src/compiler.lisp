@@ -13,6 +13,10 @@
 (defparameter *reg-t1* (get-reg :t1))
 (defparameter *reg-t2* (get-reg :t2))
 (defparameter *reg-t3* (get-reg :t3))
+(defparameter *reg-t4* (get-reg :t4))  ; PHASE 11 - arrays
+(defparameter *reg-t5* (get-reg :t5))  ; PHASE 11 - arrays
+(defparameter *reg-t6* (get-reg :t6))  ; PHASE 11 - arrays
+(defparameter *reg-t7* (get-reg :t7))  ; PHASE 11 - arrays
 (defparameter *reg-t8* (get-reg :t8))
 (defparameter *reg-t9* (get-reg :t9))
 (defparameter *reg-a0* (get-reg :a0))
@@ -303,13 +307,34 @@ qui a défini la fonction, ou NIL si non trouvée."
           ;; Évalue chaque expression en séquence, retourne le résultat de la dernière
           (list :progn args))
          
+         ;; Structure MAKE-ARRAY (PHASE 11 - Arrays pour VM)
+         (make-array
+          ;; Syntaxe: (make-array size [:initial-element value])
+          (if (>= (length args) 1)
+              (list :make-array args)
+              (error "MAKE-ARRAY requiert au moins un argument (size): ~A" expr)))
+         
+         ;; Accès AREF (PHASE 11 - Arrays pour VM)
+         (aref
+          ;; Syntaxe: (aref array index)
+          (if (= (length args) 2)
+              (list :aref (first args) (second args))
+              (error "AREF requiert exactement 2 arguments (array index): ~A" expr)))
+         
          ;; Structure DOTIMES
          (dotimes
           (list :dotimes (first args) (rest args)))
          
          ;; SETQ (assignation variable)
          (setq
-          (list :setq (first args) (second args)))
+          ;; PHASE 11: Détecter cas spécial (setf (aref array index) value)
+          (let ((place (first args))
+                (value (second args)))
+            (if (and (listp place) (eq (first place) 'aref))
+                ;; Cas SETF AREF: (setf (aref array index) value)
+                (list :setf-aref (second place) (third place) value)
+                ;; Cas SETQ normal: (setq var value)
+                (list :setq place value))))
          
          ;; Structure LABELS (fonctions locales)
          (labels
@@ -1279,6 +1304,176 @@ qui a défini la fonction, ou NIL si non trouvée."
           (setf code (append code (compile-expr expr env)))))
     code))
 
+(defun compile-make-array (args env)
+  "Compile (make-array size [:initial-element value])
+   PHASE 11 - Support arrays pour VM compilation
+   
+   Alloue un array sur le tas avec structure:
+   - array[0] = MAGIC (0xA88A)
+   - array[1] = SIZE
+   - array[2...n+1] = éléments
+   
+   Retourne l'adresse de base dans $v0"
+  (let ((size-expr (first args))
+        (init-value (if (and (>= (length args) 3)
+                            (eq (second args) :initial-element))
+                        (third args)
+                        nil))  ; nil signifie pas d'initialisation explicite
+        (code '()))
+    
+    ;; 1. Compiler et évaluer size
+    (setf code (append code (compile-expr size-expr env)))
+    ;; size est maintenant dans $v0
+    
+    ;; 2. Sauvegarder size dans $s1 (callee-saved, safe pour appels)
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-s1* *reg-sp* 0))))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-s1*))))
+    
+    ;; 3. Calculer taille totale: 2 + size (header MAGIC/SIZE + éléments)
+    (setf code (append code (list (list :ADDI *reg-s1* 2 *reg-a0*))))
+    
+    ;; 4. Allouer sur le tas
+    ;; Allocation simple: utilise $gp (Global Pointer, registre 28) comme heap pointer
+    ;; $gp est initialisé à +heap-start+ par la VM
+    ;; Algorithme:
+    ;;   addr = $gp
+    ;;   $gp = $gp + size
+    ;;   return addr
+    (let ((reg-gp (get-reg :gp)))  ; $gp = registre 28
+      ;; addr = $gp (sauvegarder dans $v0)
+      (setf code (append code (list (list :MOVE reg-gp *reg-v0*))))
+      ;; $gp = $gp + size (où size est dans $a0)
+      (setf code (append code (list (list :ADD reg-gp *reg-a0* reg-gp)))))
+    ;; $v0 contient maintenant l'adresse de base du array
+    
+    ;; 5. Sauvegarder l'adresse de base dans $s2
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-s2* *reg-sp* 4))))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-s2*))))
+    
+    ;; 6. Écrire MAGIC à base+0 (0xA88A = 43146 en décimal)
+    (setf code (append code (list (list :LI 43146 *reg-t0*))))
+    (setf code (append code (list (list :SW *reg-t0* *reg-s2* 0))))
+    
+    ;; 7. Écrire SIZE à base+1
+    (setf code (append code (list (list :SW *reg-s1* *reg-s2* 1))))
+    
+    ;; 8. Initialiser les éléments si init-value fourni
+    (when init-value
+      ;; Compiler init-value
+      (setf code (append code (compile-expr init-value env)))
+      ;; Valeur d'initialisation dans $v0, sauvegarder dans $t3
+      (setf code (append code (list (list :MOVE *reg-v0* *reg-t3*))))
+      
+      ;; Boucle d'initialisation: for (i = 0; i < size; i++) array[i+2] = init-value
+      (let ((label-loop-start (gen-label env "ARRAY_INIT_START"))
+            (label-loop-end (gen-label env "ARRAY_INIT_END")))
+        
+        ;; i = 0 (compteur dans $t0)
+        (setf code (append code (list (list :MOVE *reg-zero* *reg-t0*))))
+        
+        ;; LOOP_START:
+        (setf code (append code (list (list :LABEL label-loop-start))))
+        
+        ;; if (i >= size) goto LOOP_END (utilise SLT: set if less than)
+        (setf code (append code (list (list :SLT *reg-t0* *reg-s1* *reg-t1*))))
+        ;; $t1 = 1 si i < size, 0 sinon
+        (setf code (append code (list (list :BEQ *reg-t1* *reg-zero* label-loop-end))))
+        
+        ;; Calculer offset: i + 2 (pour header)
+        (setf code (append code (list (list :ADDI *reg-t0* 2 *reg-t2*))))
+        
+        ;; Calculer adresse effective: base + offset
+        (setf code (append code (list (list :ADD *reg-s2* *reg-t2* *reg-t4*))))
+        
+        ;; array[addr] = init-value (SW src base 0)
+        (setf code (append code (list (list :SW *reg-t3* *reg-t4* 0))))
+        
+        ;; i++
+        (setf code (append code (list (list :ADDI *reg-t0* 1 *reg-t0*))))
+        
+        ;; goto LOOP_START
+        (setf code (append code (list (list :J label-loop-start))))
+        
+        ;; LOOP_END:
+        (setf code (append code (list (list :LABEL label-loop-end))))))
+    
+    ;; 9. Retourner l'adresse du array dans $v0
+    (setf code (append code (list (list :MOVE *reg-s2* *reg-v0*))))
+    
+    ;; 10. Restaurer $s1 et $s2
+    (setf code (append code (list (list :LW *reg-s2* *reg-sp* 4))))
+    (setf code (append code (list (list :LW *reg-s1* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 8 *reg-sp*))))
+    
+    code))
+
+(defun compile-aref (array-expr index-expr env)
+  "Compile (aref array index)
+   PHASE 11 - Lecture d'élément de array
+   
+   Calcule l'adresse: base + 2 + index (offset +2 pour header)
+   Retourne la valeur dans $v0"
+  (let ((code '()))
+    
+    ;; 1. Compiler et évaluer array (adresse dans $v0)
+    (setf code (append code (compile-expr array-expr env)))
+    
+    ;; 2. Sauvegarder adresse array dans $t0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Compiler et évaluer index
+    (setf code (append code (compile-expr index-expr env)))
+    ;; index dans $v0
+    
+    ;; 4. Calculer offset réel: index + 2 (pour header)
+    (setf code (append code (list (list :ADDI *reg-v0* 2 *reg-t1*))))
+    
+    ;; 5. Calculer adresse effective: base + offset
+    (setf code (append code (list (list :ADD *reg-t0* *reg-t1* *reg-t2*))))
+    
+    ;; 6. Lire la valeur (LW dest base 0)
+    (setf code (append code (list (list :LW *reg-v0* *reg-t2* 0))))
+    
+    code))
+
+(defun compile-setf-aref (array-expr index-expr value-expr env)
+  "Compile (setf (aref array index) value)
+   PHASE 11 - Écriture d'élément de array
+   
+   Retourne value dans $v0 (comportement SETF standard)"
+  (let ((code '()))
+    
+    ;; 1. Compiler et évaluer value (pour éviter écrasement registres)
+    (setf code (append code (compile-expr value-expr env)))
+    
+    ;; 2. Sauvegarder value dans $t0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Compiler et évaluer array
+    (setf code (append code (compile-expr array-expr env)))
+    
+    ;; 4. Sauvegarder adresse array dans $t1
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t1*))))
+    
+    ;; 5. Compiler et évaluer index
+    (setf code (append code (compile-expr index-expr env)))
+    
+    ;; 6. Calculer offset réel: index + 2 (pour header)
+    (setf code (append code (list (list :ADDI *reg-v0* 2 *reg-t2*))))
+    
+    ;; 7. Calculer adresse effective: base + offset
+    (setf code (append code (list (list :ADD *reg-t1* *reg-t2* *reg-t3*))))
+    
+    ;; 8. Écrire value à cette adresse (SW src base 0)
+    (setf code (append code (list (list :SW *reg-t0* *reg-t3* 0))))
+    
+    ;; 9. Retourner value dans $v0 (comportement SETF)
+    (setf code (append code (list (list :MOVE *reg-t0* *reg-v0*))))
+    
+    code))
+
 (defun compile-dotimes (var-spec body env)
   "Compile (dotimes (var count [result]) body...)
    Syntaxe: (dotimes (i 10) (print i)) - boucle i de 0 à 9
@@ -1749,11 +1944,20 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:progn
        (compile-progn (second parsed) env))
       
+      (:make-array
+       (compile-make-array (second parsed) env))
+      
+      (:aref
+       (compile-aref (second parsed) (third parsed) env))
+      
       (:dotimes
        (compile-dotimes (second parsed) (third parsed) env))
       
       (:setq
        (compile-setq (second parsed) (third parsed) env))
+      
+      (:setf-aref
+       (compile-setf-aref (second parsed) (third parsed) (fourth parsed) env))
       
       (:labels
        (compile-labels (second parsed) (third parsed) env))

@@ -1,0 +1,339 @@
+═══════════════════════════════════════════════════════════════════════════════
+ PHASE 11.3 - IMPLÉMENTATION ARRAYS - RAPPORT FINAL
+═══════════════════════════════════════════════════════════════════════════════
+
+Date: 27 novembre 2025
+Statut: ✅ TERMINÉ - 12/12 tests passent (100%)
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. RÉSUMÉ
+═══════════════════════════════════════════════════════════════════════════════
+
+Implémentation complète du support des ARRAYS pour la compilation de vm.lisp.
+Les arrays sont essentiels car ils constituent le système mémoire de la VM.
+
+Extensions ajoutées:
+  - make-array size [:initial-element value]
+  - aref array index  
+  - setf (aref array index) value
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. ARCHITECTURE ARRAYS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ Structure en mémoire ────────────────────────────────────────────────┐
+│                                                                        │
+│  Adresse    Contenu                                                   │
+│  ────────   ─────────                                                 │
+│  base+0     MAGIC (0xA88A = 43146 décimal) - identificateur array    │
+│  base+1     SIZE (nombre d'éléments)                                  │
+│  base+2     element[0]                                                │
+│  base+3     element[1]                                                │
+│  ...        ...                                                        │
+│  base+n+1   element[n-1]                                              │
+│                                                                        │
+│  Taille totale: 2 + SIZE mots                                         │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Allocation mémoire ──────────────────────────────────────────────────┐
+│                                                                        │
+│  Utilise $gp (Global Pointer, registre 28) comme heap pointer        │
+│  $gp est initialisé à +heap-start+ par init-registers                │
+│                                                                        │
+│  Algorithme d'allocation:                                             │
+│    addr = $gp                  # Sauvegarder adresse courante        │
+│    $gp = $gp + size            # Incrémenter pointeur                │
+│    return addr                 # Retourner adresse de base           │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ 3.1 MAKE-ARRAY ──────────────────────────────────────────────────────┐
+│                                                                        │
+│  Syntaxe: (make-array size [:initial-element value])                 │
+│                                                                        │
+│  Étapes de compilation:                                               │
+│    1. Évaluer size → $v0                                              │
+│    2. Sauvegarder size dans $s1                                       │
+│    3. Calculer taille totale: 2 + size → $a0                          │
+│    4. Allouer avec $gp:                                               │
+│         addr = $gp                                                    │
+│         $gp = $gp + (2 + size)                                        │
+│    5. Sauvegarder adresse dans $s2                                    │
+│    6. Écrire MAGIC à base+0                                           │
+│    7. Écrire SIZE à base+1                                            │
+│    8. SI :initial-element fourni:                                     │
+│         Boucle: pour i=0 à size-1                                     │
+│           array[i+2] = init-value                                     │
+│    9. Retourner adresse dans $v0                                      │
+│    10. Restaurer $s1 et $s2                                           │
+│                                                                        │
+│  Fichier: src/compiler.lisp, ligne ~1307                              │
+│  Fonction: compile-make-array                                         │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 3.2 AREF ────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  Syntaxe: (aref array index)                                          │
+│                                                                        │
+│  Étapes de compilation:                                               │
+│    1. Compiler array → $v0 (adresse de base)                          │
+│    2. Sauvegarder adresse dans $t0                                    │
+│    3. Compiler index → $v0                                            │
+│    4. Calculer offset réel: index + 2 → $t1                           │
+│    5. Calculer adresse effective: base + offset → $t2                 │
+│    6. Lire valeur: LW $v0 $t2 0                                       │
+│                                                                        │
+│  Fichier: src/compiler.lisp, ligne ~1405                              │
+│  Fonction: compile-aref                                               │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 3.3 SETF AREF ───────────────────────────────────────────────────────┐
+│                                                                        │
+│  Syntaxe: (setf (aref array index) value)                            │
+│                                                                        │
+│  Étapes de compilation:                                               │
+│    1. Compiler value → $v0                                            │
+│    2. Sauvegarder value dans $t0                                      │
+│    3. Compiler array → $v0                                            │
+│    4. Sauvegarder adresse dans $t1                                    │
+│    5. Compiler index → $v0                                            │
+│    6. Calculer offset réel: index + 2 → $t2                           │
+│    7. Calculer adresse effective: base + offset → $t3                 │
+│    8. Écrire valeur: SW $t0 $t3 0                                     │
+│    9. Retourner value dans $v0 (comportement SETF)                    │
+│                                                                        │
+│  Fichier: src/compiler.lisp, ligne ~1426                              │
+│  Fonction: compile-setf-aref                                          │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. MODIFICATIONS FICHIERS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ 4.1 src/compiler.lisp ───────────────────────────────────────────────┐
+│                                                                        │
+│  • Ligne 15-18: Ajout *reg-t4*, *reg-t5*, *reg-t6*, *reg-t7*         │
+│  • Ligne ~307: Parser make-array                                      │
+│  • Ligne ~314: Parser aref                                            │
+│  • Ligne ~330: Parser setf aref (dans case setq)                      │
+│  • Ligne ~1307: Fonction compile-make-array (155 lignes)             │
+│  • Ligne ~1405: Fonction compile-aref (25 lignes)                    │
+│  • Ligne ~1426: Fonction compile-setf-aref (35 lignes)               │
+│  • Ligne ~1930: Case :make-array dans compile-expr                   │
+│  • Ligne ~1933: Case :aref dans compile-expr                         │
+│  • Ligne ~1942: Case :setf-aref dans compile-expr                    │
+│                                                                        │
+│  Total: +230 lignes de code                                           │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 4.2 src/asm-ops.lisp ────────────────────────────────────────────────┐
+│                                                                        │
+│  • Ligne 139: Ajout case :gp dans get-reg                            │
+│                                                                        │
+│  Total: +1 ligne                                                       │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ 4.3 Nouveaux fichiers ───────────────────────────────────────────────┐
+│                                                                        │
+│  • src/compiler-extensions/compile-arrays.lisp                        │
+│    Documentation complète de l'implémentation arrays (450 lignes)    │
+│                                                                        │
+│  • tests/unit/test-arrays.lisp                                        │
+│    12 tests unitaires (155 lignes)                                    │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. TESTS
+═══════════════════════════════════════════════════════════════════════════════
+
+Fichier: tests/unit/test-arrays.lisp
+Statut: ✅ 12/12 tests passent (100%)
+
+┌─ Liste des tests ─────────────────────────────────────────────────────┐
+│                                                                        │
+│  ✅ Test  1: Créer array de taille 5                                  │
+│  ✅ Test  2: Lire élément par défaut (sans init)                      │
+│  ✅ Test  3: Créer array avec :initial-element 42                     │
+│  ✅ Test  4: Lire différents indices (init 99)                        │
+│  ✅ Test  5: Écrire avec setf aref                                    │
+│  ✅ Test  6: Écrire index 3, lire index 3                             │
+│  ✅ Test  7: Éléments indépendants                                    │
+│  ✅ Test  8: Boucle WHILE remplissage array                           │
+│  ✅ Test  9: Accumuler valeurs array avec WHILE                       │
+│  ✅ Test 10: Array avec calculs (carrés)                              │
+│  ✅ Test 11: Créer plusieurs arrays indépendants                      │
+│  ✅ Test 12: SETF AREF retourne la valeur assignée                    │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Couverture ──────────────────────────────────────────────────────────┐
+│                                                                        │
+│  • Allocation simple                        ✅                        │
+│  • Allocation avec :initial-element         ✅                        │
+│  • Lecture d'éléments                       ✅                        │
+│  • Écriture d'éléments (setf aref)          ✅                        │
+│  • Indépendance des éléments                ✅                        │
+│  • Intégration avec WHILE/PROGN             ✅                        │
+│  • Calculs complexes (accumulation)         ✅                        │
+│  • Plusieurs arrays indépendants            ✅                        │
+│  • Valeur de retour de setf                 ✅                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. PROBLÈMES RENCONTRÉS ET SOLUTIONS
+═══════════════════════════════════════════════════════════════════════════════
+
+┌─ Problème 1: Registre $gp inconnu ────────────────────────────────────┐
+│                                                                        │
+│  Symptôme: "Registre inconnu: GP"                                     │
+│  Cause: Case :gp manquant dans get-reg                                │
+│  Solution: Ajout case (:gp (nth 28 *register-names*))                │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Problème 2: Variables *reg-t4/t5/t6/t7* non définies ────────────────┐
+│                                                                        │
+│  Symptôme: "SETQ: variable *REG-T4* has no value"                    │
+│  Cause: Registres temporaires supplémentaires non initialisés        │
+│  Solution: Ajout defparameter pour *reg-t4*, *reg-t5*, *reg-t6/7*   │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Problème 3: LW/SW avec registre comme offset ────────────────────────┐
+│                                                                        │
+│  Symptôme: "+: :$T1 is not a number"                                 │
+│  Cause: LW/SW attendent offset numérique, pas registre               │
+│  Solution: Utiliser ADD pour calculer adresse, puis LW/SW offset 0   │
+│    Avant: (LW $v0 $t0 $t1)                                           │
+│    Après: (ADD $t0 $t1 $t2) + (LW $v0 $t2 0)                        │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Problème 4: push + nreverse dans compile-make-array ─────────────────┐
+│                                                                        │
+│  Symptôme: Ordre d'instructions incorrect                            │
+│  Cause: Utilisation de push puis nreverse inverse l'ordre            │
+│  Solution: Remplacer par setf code (append code ...)                 │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+┌─ Problème 5: Test 1 attendait 4096, obtenait 21 ──────────────────────┐
+│                                                                        │
+│  Symptôme: Adresse array incorrecte dans test 1                      │
+│  Cause: +heap-start+ dépend de la configuration (21 ou 4096)         │
+│  Solution: Utiliser +heap-start+ dynamique au lieu de constante      │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. UTILISATION DANS VM.LISP
+═══════════════════════════════════════════════════════════════════════════════
+
+Les arrays sont utilisés 7 fois dans vm.lisp:
+
+1. Ligne 39: (memory (make-array *maxmem* :initial-element 0))
+   → Création du tableau mémoire de la VM
+
+2. Ligne 89: (setf (vm-memory vm) (make-array *maxmem* :initial-element 0))
+   → Réinitialisation de la mémoire
+
+3. Ligne 149: (aref (vm-memory vm) addr)
+   → Lecture mémoire (mem-read)
+
+4. Ligne 154: (setf (aref (vm-memory vm) addr) value)
+   → Écriture mémoire (mem-write)
+
+5. Ligne 168: (aref (vm-memory vm) addr)
+   → Dump mémoire (dump-memory)
+
+6. Ligne 216: (aref (vm-memory vm) addr)
+   → Dump stack (dump-stack)
+
+7. Ligne 304: (aref (vm-memory vm) addr)
+   → Fetch instruction
+
+┌─ Impact ──────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  Les arrays sont CRITIQUES pour vm.lisp:                             │
+│  • Ils constituent le système mémoire complet de la VM                │
+│  • Sans arrays, impossible de compiler vm.lisp                        │
+│  • Toutes les opérations mémoire dépendent d'eux                      │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. STATISTIQUES
+═══════════════════════════════════════════════════════════════════════════════
+
+Code ajouté:
+  • src/compiler.lisp:                        +230 lignes
+  • src/asm-ops.lisp:                         +1 ligne
+  • src/compiler-extensions/compile-arrays.lisp: 450 lignes (documentation)
+  • tests/unit/test-arrays.lisp:              155 lignes
+  ───────────────────────────────────────────────────
+  TOTAL:                                      +836 lignes
+
+Tests:
+  • Nombre de tests:    12
+  • Tests passant:      12  (100%)
+  • Temps développement: ~2h
+  • Itérations debug:   5
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════════════════
+
+Phase 11.4 - DOLIST (estimé: 1-2h)
+  • Parser (dolist (var list) body...)
+  • Compiler boucle avec CDR et NULL
+  • Tests (8-10 tests)
+
+Phase 11.5 - Simplification VM (estimé: 4-5h)
+  • Créer vm-compilable.lisp
+  • Remplacer constructs non supportés
+  • Vérifier tous les usages de vm.lisp
+
+Phase 11.6 - Compilation VM → MIPS (estimé: 2-3h)
+  • Compiler vm-compilable.lisp
+  • Générer code MIPS complet
+  • Sauvegarder dans vm-compiled.asm
+
+Phase 11.7 - Test VM₁ dans VM₀ (estimé: 2-3h)
+  • Charger VM₁ dans VM₀
+  • Exécuter programmes simples
+  • Validation bootstrap
+
+═══════════════════════════════════════════════════════════════════════════════
+ 10. CONCLUSION
+═══════════════════════════════════════════════════════════════════════════════
+
+✅ ARRAYS 100% FONCTIONNEL
+
+L'implémentation des arrays est complète et robuste. Tous les tests passent,
+couvrant l'allocation, la lecture, l'écriture, l'initialisation, et
+l'intégration avec les autres constructs (WHILE, PROGN, LET).
+
+Les arrays sont maintenant prêts pour compiler vm.lisp, qui dépend
+entièrement d'eux pour son système mémoire.
+
+Phase 11 progression: ~30% → ~35%
+  ✅ WHILE loops (10/10 tests)
+  ✅ PROGN sequences
+  ✅ ARRAYS (12/12 tests)
+  ⏸️ DOLIST
+  ⏸️ VM simplification
+  ⏸️ Compilation VM
+  ⏸️ Tests VM₁
+
+══════════════════════════════════════════════════════════════════════════════

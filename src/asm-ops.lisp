@@ -136,6 +136,7 @@
     (:t8 (nth 24 *register-names*))   ; :$t8
     (:t9 (nth 25 *register-names*))   ; :$t9
     (:zero (nth 0 *register-names*))  ; :$zero
+    (:gp (nth 28 *register-names*))   ; :$gp (Global Pointer - PHASE 11 arrays)
     (t (error "Registre inconnu: ~A" name))))
 
 ;;; ============================================================================
