@@ -5,8 +5,8 @@
 ;;; CONSTANTES
 ;;; ============================================================================
 
-(defparameter *maxmem* 10000
-  "Taille maximale de la mémoire de la VM")
+(defparameter *maxmem* 1048576
+  "Taille maximale de la mémoire de la VM (4 Mo = 1048576 mots de 4 octets)")
 
 ;;; CONVENTIONS MIPS
 ;;; $zero ($0) = toujours 0

@@ -1,0 +1,301 @@
+================================================================================
+RÉORGANISATION COMPLÈTE DU PROJET
+================================================================================
+
+Date: 27 novembre 2025
+Contexte: Préparation Phase 11 (Compilation VM en MIPS)
+Durée: ~15 minutes
+
+================================================================================
+OBJECTIFS
+================================================================================
+
+1. Nettoyer la racine du projet (trop de fichiers épars)
+2. Créer une structure logique et hiérarchique
+3. Séparer clairement documentation, code, tests, archives
+4. Faciliter la navigation et la maintenance
+5. Préparer le terrain pour Phase 11
+
+================================================================================
+ACTIONS EFFECTUÉES
+================================================================================
+
+1. CRÉATION DE NOUVEAUX DOSSIERS
+   ----------------------------
+   ✅ docs/history/          - Documents historiques datés
+   ✅ docs/phases/           - Documentation par phase
+   ✅ docs/phases/phase10/   - 13 documents Phase 10
+   ✅ docs/phases/phase11/   - 3 documents Phase 11
+   ✅ logs/                  - Fichiers de log
+   ✅ scripts/phase10/       - Scripts Phase 10
+   ✅ tests/validation/      - Tests de validation
+   ✅ tests/performance/results/ - Résultats benchmarks
+
+2. DÉPLACEMENTS DE FICHIERS
+   ------------------------
+
+   Documentation → docs/history/
+   ✅ CHANGEMENTS_27NOV2025.txt
+   ✅ ETAT_PROJET_27NOV2025.txt
+   
+   Documentation → docs/
+   ✅ CHANGELOG.md
+
+   Plans obsolètes → archive/
+   ✅ PLAN_ACTION_COMPLET.md
+   ✅ REORGANISATION.md
+   ✅ RESUME_PLAN.txt
+   ✅ README.md.backup
+
+   Scripts → scripts/
+   ✅ run-all-tests.sh
+   ✅ run-unit-tests.sh
+
+   Scripts → scripts/phase10/
+   ✅ START_PHASE10.sh
+
+   Logs → logs/
+   ✅ baseline-phase10.log
+
+   Tests → tests/validation/
+   ✅ test-final-validation.lisp
+
+   Documents Phase 10 → docs/phases/phase10/
+   ✅ 13 fichiers .md depuis bootstrap/
+
+   Documents Phase 11 → docs/phases/phase11/
+   ✅ PLAN_ACTION_VM1.txt
+   ✅ ARCHITECTURE_VM0_VM1.txt
+   ✅ CHECKLIST_PHASE11.txt
+   ✅ PLAN_ACTION_VM1_COMPILATION_OLD.txt
+
+   Benchmarks → tests/performance/results/
+   ✅ RAPPORT_PERFORMANCE_FINALE.txt
+   ✅ performance-results.txt
+   ✅ performance-results-4mo.txt
+   ✅ performance-results-4mo-final.txt
+
+3. RÉORGANISATION BOOTSTRAP
+   -------------------------
+   ✅ bootstrap/ renommé en src/bootstrap-backup
+   ✅ Créé nouveau bootstrap/src/ pour code Phase 10
+   ✅ Séparation code/documentation bootstrap
+
+4. SUPPRESSION DOSSIERS VIDES
+   ---------------------------
+   ✅ vm1-compilation/benchmarks/
+   ✅ vm1-compilation/extensions/
+   ✅ vm1-compilation/generated/
+   ✅ vm1-compilation/ (racine)
+
+5. CRÉATION DE DOCUMENTATION
+   --------------------------
+   ✅ STRUCTURE_PROJET.md - 400+ lignes, structure complète détaillée
+   ✅ docs/INDEX.md - Index complet de tous les documents
+   ✅ README.md - Mis à jour avec nouveaux chemins
+
+================================================================================
+STRUCTURE AVANT RÉORGANISATION
+================================================================================
+
+Racine du projet (23 éléments):
+├── archive/
+├── baseline-phase10.log              [À DÉPLACER]
+├── bootstrap/                         [À RÉORGANISER]
+├── CHANGELOG.md                       [À DÉPLACER]
+├── CHANGEMENTS_27NOV2025.txt         [À DÉPLACER]
+├── docs/
+├── ETAT_PROJET_27NOV2025.txt         [À DÉPLACER]
+├── examples/
+├── main.lisp                          [OK]
+├── output/
+├── PLAN_ACTION_COMPLET.md            [À ARCHIVER]
+├── README.md                          [OK]
+├── README.md.backup                   [À ARCHIVER]
+├── REORGANISATION.md                  [À ARCHIVER]
+├── RESUME_PLAN.txt                    [À ARCHIVER]
+├── run-all-tests.sh                   [À DÉPLACER]
+├── run-unit-tests.sh                  [À DÉPLACER]
+├── scripts/
+├── src/
+├── START_PHASE10.sh                   [À DÉPLACER]
+├── test-final-validation.lisp        [À DÉPLACER]
+├── test-results/
+├── tests/
+└── vm1-compilation/                   [À RÉORGANISER]
+
+Problèmes:
+- 8 fichiers de documentation épars à la racine
+- 3 scripts épars à la racine
+- 1 fichier de log à la racine
+- 1 fichier de test à la racine
+- Dossiers bootstrap et vm1-compilation mal organisés
+
+================================================================================
+STRUCTURE APRÈS RÉORGANISATION
+================================================================================
+
+Racine du projet (13 éléments) ✅:
+├── archive/                    # Fichiers obsolètes
+├── bootstrap/                  # Code bootstrap Phase 10
+│   └── src/
+├── docs/                       # Documentation complète
+│   ├── CHANGELOG.md
+│   ├── INDEX.md               # [NOUVEAU] Index complet
+│   ├── history/               # [NOUVEAU] Documents datés
+│   ├── phases/                # [NOUVEAU] Docs par phase
+│   │   ├── phase10/          # [NOUVEAU] 13 docs Phase 10
+│   │   └── phase11/          # [NOUVEAU] 3 docs Phase 11
+│   ├── FichierTexteSuivi/
+│   └── Ressource_externe/
+├── examples/
+├── logs/                      # [NOUVEAU] Fichiers de log
+├── main.lisp
+├── output/
+├── README.md
+├── scripts/                   # Scripts centralisés
+│   ├── run-all-tests.sh
+│   ├── run-unit-tests.sh
+│   ├── run-tests.sh
+│   ├── validate-phase8.sh
+│   └── phase10/              # [NOUVEAU] Scripts Phase 10
+│       └── START_PHASE10.sh
+├── src/                       # Code source principal
+│   ├── vm.lisp
+│   ├── compiler.lisp
+│   ├── loader.lisp
+│   ├── asm-ops.lisp
+│   ├── utils.lisp
+│   └── bootstrap/            # Code bootstrap
+├── STRUCTURE_PROJET.md       # [NOUVEAU] Structure détaillée
+├── test-results/
+└── tests/                     # Tests organisés
+    ├── debug/
+    ├── integration/
+    ├── performance/
+    │   ├── test-performance-real.lisp
+    │   └── results/          # [NOUVEAU] Résultats benchmarks
+    ├── unit/
+    └── validation/           # [NOUVEAU] Tests validation
+        └── test-final-validation.lisp
+
+Améliorations:
+✅ Racine épurée (23 → 13 éléments, -43%)
+✅ Documentation centralisée dans docs/
+✅ Scripts centralisés dans scripts/
+✅ Tests mieux organisés
+✅ Logs dans leur propre dossier
+✅ Documentation par phase claire
+✅ Index complet créé
+✅ Structure détaillée documentée
+
+================================================================================
+BÉNÉFICES
+================================================================================
+
+1. CLARTÉ
+   - Racine épurée et professionnelle
+   - Hiérarchie logique facile à comprendre
+   - Séparation claire code/docs/tests/archives
+
+2. MAINTENABILITÉ
+   - Fichiers faciles à trouver
+   - Organisation par phase claire
+   - Index complet de la documentation
+
+3. ÉVOLUTIVITÉ
+   - Structure prête pour Phase 11
+   - Facile d'ajouter nouvelles phases
+   - Templates de structure établis
+
+4. PROFESSIONNALISME
+   - Structure standard de projet
+   - Documentation bien organisée
+   - Historique préservé
+
+5. NAVIGATION
+   - STRUCTURE_PROJET.md: vue d'ensemble complète
+   - docs/INDEX.md: tous les documents référencés
+   - README.md: point d'entrée clair
+
+================================================================================
+FICHIERS CRÉÉS
+================================================================================
+
+1. STRUCTURE_PROJET.md (racine)
+   - 400+ lignes
+   - Structure complète détaillée
+   - Arborescence avec descriptions
+   - Configuration mémoire
+   - Phases du projet
+   - Instructions MIPS
+   - Commandes principales
+
+2. docs/INDEX.md
+   - Index exhaustif de tous les documents
+   - Organisé par catégorie
+   - Navigation rapide par objectif
+   - Recherche par mot-clé
+   - État de chaque document
+
+3. docs/history/REORGANISATION_27NOV2025.txt (ce fichier)
+   - Trace complète de la réorganisation
+   - Avant/après
+   - Actions détaillées
+   - Bénéfices
+
+================================================================================
+FICHIERS MIS À JOUR
+================================================================================
+
+1. README.md
+   - Chemins mis à jour (docs/phases/)
+   - Référence à STRUCTURE_PROJET.md
+   - Structure simplifiée dans README
+   - Détails dans STRUCTURE_PROJET.md
+
+================================================================================
+VALIDATION
+================================================================================
+
+État final vérifié:
+✅ Racine propre (13 éléments vs 23)
+✅ Tous les fichiers déplacés correctement
+✅ Aucun fichier perdu
+✅ Documentation complète
+✅ Structure logique et cohérente
+✅ Navigation facilitée
+✅ Prêt pour Phase 11
+
+================================================================================
+PROCHAINES ÉTAPES
+================================================================================
+
+Phase 11: Compilation de la VM en MIPS
+1. Analyser src/vm.lisp (686 lignes)
+2. Implémenter extensions compilateur (loops, arrays, case)
+3. Simplifier VM pour compilation
+4. Compiler VM en MIPS
+5. Tester VM₁ dans VM₀
+6. Mesurer performances réelles
+
+Documentation de référence:
+- docs/phases/phase11/PLAN_ACTION_VM1.txt
+- docs/phases/phase11/ARCHITECTURE_VM0_VM1.txt
+- docs/phases/phase11/CHECKLIST_PHASE11.txt
+
+================================================================================
+NOTES
+================================================================================
+
+- Tous les fichiers originaux préservés (aucune perte)
+- Archives conservées dans archive/
+- Historique Git préservé
+- Tests fonctionnent toujours (chemins relatifs)
+- Scripts mis à jour si nécessaire
+
+Réorganisation effectuée avec succès ! ✅
+
+================================================================================
+FIN DU RAPPORT
+================================================================================

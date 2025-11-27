@@ -1,0 +1,161 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                    CHANGEMENTS - 27 NOVEMBRE 2025                          ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════
+NETTOYAGE EFFECTUÉ
+═══════════════════════════════════════════════════════════════════════════
+
+✅ SUPPRIMÉ
+   - archive/mini-vm.lisp
+   - archive/PLAN_VM1_COMPILATION.lisp
+   Raison : Approche mini-VM abandonnée, non nécessaire
+
+✅ DÉPLACÉ vers src/bootstrap/
+   - compiler-bootstrap.lisp
+   - vm-bootstrap.lisp
+   - loader-bootstrap.lisp
+   - primitives.lisp
+   Raison : Phase 10 terminée, fichiers gardés pour référence historique
+
+✅ RENOMMÉ
+   - PLAN_ACTION_VM1_COMPILATION.txt → PLAN_ACTION_VM1_COMPILATION_OLD.txt
+   - PLAN_SIMPLIFIE_VM1.txt → PLAN_ACTION_VM1.txt
+   Raison : Nouveau plan plus clair et plus court
+
+═══════════════════════════════════════════════════════════════════════════
+DOCUMENTS CRÉÉS
+═══════════════════════════════════════════════════════════════════════════
+
+✅ vm1-compilation/PLAN_ACTION_VM1.txt
+   - Plan simplifié : 8 phases (25-32h)
+   - Utilise src/vm.lisp comme base
+   - Extensions : loops, arrays, case (pas hash-tables ni defstruct complet)
+
+✅ vm1-compilation/ARCHITECTURE_VM0_VM1.txt
+   - Architecture clarifiée
+   - Diagrammes flux d'exécution
+   - Explication VM₀ vs VM₁
+
+✅ vm1-compilation/CHECKLIST_PHASE11.txt (mis à jour implicitement)
+
+═══════════════════════════════════════════════════════════════════════════
+CLARIFICATIONS ARCHITECTURALES
+═══════════════════════════════════════════════════════════════════════════
+
+AVANT (confus) :
+  - VM₀ = VM native
+  - VM₁ = Autre VM sur VM₀ (2 instances séparées)
+  - Mini-VM pour simplifier
+  - Bootstrap files nécessaires
+
+APRÈS (clair) :
+  - VM₀ = src/vm.lisp exécutée en LISP natif
+  - VM₁ = src/vm.lisp compilée en MIPS, chargée dans VM₀
+  - C'EST LA MÊME VM, deux implémentations
+  - Bootstrap files = référence historique Phase 10
+
+═══════════════════════════════════════════════════════════════════════════
+STRUCTURE PROJET FINALE
+═══════════════════════════════════════════════════════════════════════════
+
+VirtualMachine_CLISP/
+│
+├── src/
+│   ├── vm.lisp                 ✅ BASE pour VM₁ (à compiler)
+│   ├── compiler.lisp           ✅ À étendre
+│   ├── loader.lisp
+│   ├── asm-ops.lisp
+│   ├── utils.lisp
+│   └── bootstrap/              📁 Phase 10 (référence)
+│       ├── compiler-bootstrap.lisp
+│       ├── vm-bootstrap.lisp
+│       ├── loader-bootstrap.lisp
+│       └── primitives.lisp
+│
+├── vm1-compilation/            🚀 Phase 11
+│   ├── PLAN_ACTION_VM1.txt              ← Nouveau (25-32h)
+│   ├── ARCHITECTURE_VM0_VM1.txt         ← Nouveau
+│   ├── PLAN_ACTION_VM1_COMPILATION_OLD.txt  ← Ancien plan
+│   ├── CHECKLIST_PHASE11.txt
+│   ├── extensions/
+│   ├── generated/
+│   └── benchmarks/
+│
+├── tests/
+├── bootstrap/                  📁 Phase 10 docs
+├── docs/
+├── archive/                    🗑️ (mini-vm supprimés)
+│
+├── README.md                   ✅ Mis à jour
+└── ETAT_PROJET_27NOV2025.txt
+
+═══════════════════════════════════════════════════════════════════════════
+MODIFICATIONS README.md
+═══════════════════════════════════════════════════════════════════════════
+
+✅ Structure projet mise à jour
+   - Bootstrap dans src/bootstrap/
+   - Phase 11 clarifiée
+
+✅ Documentation Phase 11 mise à jour
+   - PLAN_ACTION_VM1.txt (25-32h)
+   - ARCHITECTURE_VM0_VM1.txt
+   - Objectif clarifié : compiler src/vm.lisp
+
+✅ Note ajoutée
+   - VM₀ = VM native (LISP)
+   - VM₁ = même VM compilée (MIPS)
+
+═══════════════════════════════════════════════════════════════════════════
+PLAN PHASE 11 SIMPLIFIÉ
+═══════════════════════════════════════════════════════════════════════════
+
+8 PHASES (au lieu de 10) :
+
+1. Analyser src/vm.lisp                    2-3h
+2. Implémenter LOOP/WHILE                  3-4h
+3. Implémenter ARRAYS                      2-3h
+4. Implémenter CASE                        2-3h
+5. Simplifier VM (vm-compilable.lisp)      3-4h
+6. Compiler VM → MIPS                      4-5h
+7. Tests et validation                     3-4h
+8. Documentation                           2h
+   ────────────────────────────────────────────
+   TOTAL                                 21-28h
+   Avec imprévus                         25-32h
+
+GAIN : 5-10h vs ancien plan (30-36h)
+
+Raison : 
+  - Pas de hash-tables complètes (on simplifie avec arrays)
+  - Pas de defstruct complet (variables globales)
+  - Pas de mini-VM (on compile la vraie)
+
+═══════════════════════════════════════════════════════════════════════════
+PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════════════
+
+1. Lire vm1-compilation/ARCHITECTURE_VM0_VM1.txt
+2. Lire vm1-compilation/PLAN_ACTION_VM1.txt
+3. Démarrer Phase 1 : Analyser src/vm.lisp
+4. Suivre la checklist
+
+═══════════════════════════════════════════════════════════════════════════
+RÉSUMÉ
+═══════════════════════════════════════════════════════════════════════════
+
+✅ Projet nettoyé (mini-vm supprimés)
+✅ Fichiers bootstrap déplacés (src/bootstrap/)
+✅ Architecture clarifiée (VM₀ = native, VM₁ = compilée)
+✅ Plan simplifié (25-32h au lieu de 30-36h)
+✅ Documentation complète (2 nouveaux docs)
+✅ README mis à jour
+
+🎯 Objectif Phase 11 clair :
+   Compiler src/vm.lisp (686 lignes) en MIPS
+   pour créer VM₁ qui tourne dans VM₀
+
+🚀 PRÊT À DÉMARRER PHASE 11 !
+
+═══════════════════════════════════════════════════════════════════════════

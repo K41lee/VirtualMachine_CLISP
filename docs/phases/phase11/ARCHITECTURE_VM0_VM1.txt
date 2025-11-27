@@ -1,0 +1,159 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║              ARCHITECTURE VM₀ / VM₁ - CLARIFICATION                        ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Date: 27 novembre 2025
+
+════════════════════════════════════════════════════════════════════════════
+CONCEPT ARCHITECTURAL
+════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────┐
+│                                                                        │
+│  VM₀ (Native) = src/vm.lisp exécutée en Common LISP                  │
+│  VM₁ (Compilée) = src/vm.lisp compilée en MIPS                       │
+│                                                                        │
+│  ⚠️  C'EST LA MÊME VM !                                               │
+│     Juste deux implémentations :                                      │
+│       - VM₀ : Code LISP natif (interpréteur)                         │
+│       - VM₁ : Code MIPS (compilé)                                    │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════
+FLUX D'EXÉCUTION
+════════════════════════════════════════════════════════════════════════════
+
+SCÉNARIO : Exécuter le programme LISP (+ 2 3)
+
+1. COMPILATION DU PROGRAMME
+   ┌──────────────────┐
+   │  (+ 2 3)         │ Programme LISP
+   └────────┬─────────┘
+            │ compile-lisp
+            ↓
+   ┌──────────────────┐
+   │  (LI 2 $T0)      │
+   │  (LI 3 $T1)      │ Code MIPS (code_prog)
+   │  (ADD $T0 $T1 $V0│
+   │  (HALT)          │
+   └────────┬─────────┘
+
+2. EXÉCUTION SUR VM₀ (Native)
+   ┌──────────────────┐
+   │  VM₀ (LISP)      │ Charge code_prog
+   │  ┌────────────┐  │ Exécute instructions
+   │  │ code_prog  │  │ Résultat : $V0 = 5
+   │  └────────────┘  │
+   └──────────────────┘
+
+3. EXÉCUTION SUR VM₁ (Compilée dans VM₀)
+   ┌──────────────────────────────────┐
+   │  VM₀ (LISP) - Hôte              │
+   │  ┌────────────────────────────┐ │
+   │  │  VM₁ (MIPS code)           │ │ VM compilée en MIPS
+   │  │  ┌──────────────────────┐  │ │
+   │  │  │  code_prog           │  │ │ Programme à exécuter
+   │  │  │  (LI 2 $T0)          │  │ │
+   │  │  │  (LI 3 $T1)          │  │ │
+   │  │  │  (ADD $T0 $T1 $V0)   │  │ │
+   │  │  └──────────────────────┘  │ │
+   │  │                             │ │
+   │  │  VM₁ exécute code_prog     │ │
+   │  │  Résultat : $V0 = 5        │ │
+   │  └────────────────────────────┘ │
+   │                                  │
+   │  VM₀ exécute VM₁ (MIPS)         │
+   └──────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════
+POURQUOI CETTE ARCHITECTURE ?
+════════════════════════════════════════════════════════════════════════════
+
+OBJECTIF PÉDAGOGIQUE :
+  Démontrer qu'on peut compiler un interpréteur et le faire tourner
+  dans lui-même (concept de bootstrap métacirculaire)
+
+INTÉRÊT PRATIQUE :
+  - Mesurer l'overhead d'une VM sur VM
+  - Comprendre les limites de l'auto-hébergement
+  - Valider que notre compilateur peut compiler du code complexe
+
+RÉSULTAT ATTENDU :
+  VM₁ sera BEAUCOUP plus lente que VM₀ (overhead 10-50x estimé)
+  mais fonctionnellement équivalente
+
+════════════════════════════════════════════════════════════════════════════
+FICHIERS SOURCES
+════════════════════════════════════════════════════════════════════════════
+
+FICHIERS PRINCIPAUX (Phase 11)
+├── src/vm.lisp                    ← VM à compiler (686 lignes)
+│   └─→ VM₀ : exécuté en LISP natif
+│   └─→ VM₁ : compilé en MIPS
+│
+├── src/compiler.lisp              ← Compilateur à étendre
+│   └─ Doit pouvoir compiler vm.lisp
+│
+├── src/loader.lisp                ← Charge le code MIPS
+├── src/asm-ops.lisp               ← Opcodes et constantes
+└── src/utils.lisp                 ← Utilitaires
+
+FICHIERS BOOTSTRAP (Phase 10 - RÉFÉRENCE UNIQUEMENT)
+├── src/bootstrap/vm-bootstrap.lisp
+├── src/bootstrap/compiler-bootstrap.lisp
+├── src/bootstrap/loader-bootstrap.lisp
+└── src/bootstrap/primitives.lisp
+
+⚠️  NOTE IMPORTANTE :
+    Les fichiers bootstrap sont gardés pour référence historique
+    (Phase 10 : auto-compilation du compilateur)
+    
+    Pour Phase 11, on utilise src/vm.lisp (la vraie VM)
+    PAS vm-bootstrap.lisp
+
+════════════════════════════════════════════════════════════════════════════
+DIFFÉRENCE VM vs VM-BOOTSTRAP
+════════════════════════════════════════════════════════════════════════════
+
+src/vm.lisp (686 lignes)
+  ✓ VM complète avec tous les opcodes
+  ✓ Messages debug (when verbose ...)
+  ✓ Dump registres et pile pour debug
+  ✓ Gestion d'erreurs détaillée
+  → À UTILISER pour Phase 11
+
+src/bootstrap/vm-bootstrap.lisp (643 lignes)
+  ✓ VM simplifiée, messages debug retirés
+  ✓ Utilisée pour Phase 10 (bootstrap compilateur)
+  → RÉFÉRENCE HISTORIQUE, ne pas utiliser pour Phase 11
+
+════════════════════════════════════════════════════════════════════════════
+ÉTAPES PHASE 11
+════════════════════════════════════════════════════════════════════════════
+
+1. Étendre le compilateur (loops, arrays, case)
+2. Simplifier vm.lisp → vm-compilable.lisp
+   - Remplacer defstruct par variables globales
+   - Remplacer hash-table par array
+   - Ignorer messages debug (ne pas compiler)
+3. Compiler vm-compilable.lisp → vm1.mips
+4. Tester :
+   - Charger vm1.mips dans VM₀
+   - VM₀ exécute vm1.mips
+   - vm1 exécute un programme simple
+5. Mesurer performances : LISP vs VM₀ vs VM₁
+
+════════════════════════════════════════════════════════════════════════════
+RÉSUMÉ
+════════════════════════════════════════════════════════════════════════════
+
+VM₀ = VM native (LISP)
+VM₁ = VM compilée (MIPS dans VM₀)
+
+C'est la MÊME VM, deux implémentations différentes.
+
+Objectif : Prouver qu'on peut compiler notre VM et la faire tourner
+          dans elle-même (bootstrap métacirculaire niveau 2)
+
+════════════════════════════════════════════════════════════════════════════

@@ -69,10 +69,13 @@
   (- *maxmem* *code-size*))
 
 (defun load-code (vm asm-code &key (verbose nil))
-  "Charge le code assembleur dans la mémoire de la VM"
-  (let ((code-start (calculate-code-start vm)))
+  "Charge le code assembleur dans la mémoire de la VM
+   Ajoute automatiquement HALT à la fin pour éviter l'erreur 'Instruction nulle'."
+  (let ((code-start (calculate-code-start vm))
+        ;; Ajouter HALT à la fin du code (avec :HALT)
+        (asm-code-with-halt (append asm-code '((:HALT)))))
     (multiple-value-bind (resolved-code labels)
-        (preprocess-code asm-code code-start)
+        (preprocess-code asm-code-with-halt code-start)
     
     (when verbose
       (format t "~%=== CHARGEMENT DU CODE ===~%")

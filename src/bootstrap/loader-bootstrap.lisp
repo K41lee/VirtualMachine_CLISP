@@ -91,9 +91,12 @@
 
 (defun load-code-bootstrap (vm asm-code)
   "Charge le code assembleur dans la mémoire de la VM.
-   Version simplifiée sans verbose ni messages debug."
+   Version simplifiée sans verbose ni messages debug.
+   Ajoute automatiquement HALT à la fin pour éviter l'erreur 'Instruction nulle'."
   (let* ((code-start (calculate-code-start-bootstrap vm))
-         (result (preprocess-code-bootstrap asm-code code-start))
+         ;; Ajouter HALT à la fin du code pour arrêter proprement (avec :HALT)
+         (asm-code-with-halt (my-append asm-code '((:HALT))))
+         (result (preprocess-code-bootstrap asm-code-with-halt code-start))
          (resolved-code (car result))
          (labels (cdr result)))
     

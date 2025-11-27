@@ -1,0 +1,513 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                   PLAN D'ACTION DÉTAILLÉ                                   ║
+║         Rendre la VM Bootstrap Compilable en MIPS                          ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Date: 27 novembre 2025
+Objectif: Compiler src/vm-bootstrap.lisp → MIPS → Charger dans VM₀
+Durée estimée: 25-35 heures de développement
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 1 : ANALYSE ET PRÉPARATION (2-3h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 1.1 Analyser les dépendances de vm-bootstrap.lisp
+    └─ Lister toutes les fonctions utilisées
+    └─ Identifier les primitives LISP nécessaires
+    └─ Détecter les constructions non supportées
+
+[ ] 1.2 Créer une liste des extensions nécessaires au compilateur
+    └─ While loops
+    └─ Arrays (aref, make-array)
+    └─ Hash-tables (gethash, sethash)
+    └─ Case/switch
+    └─ Defstruct
+    └─ Functions récursives complexes
+
+[ ] 1.3 Simplifier vm-bootstrap.lisp si nécessaire
+    └─ Remplacer hash-tables par arrays indexés
+    └─ Remplacer defstruct par variables globales
+    └─ Linéariser les fonctions récursives complexes
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 2 : EXTENSION DU COMPILATEUR - BOUCLES (3-4h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 2.1 Implémenter LOOP (forme simple)
+    Fichier: src/compiler-bootstrap.lisp
+    
+    Syntaxe à supporter:
+      (loop while condition do body)
+      (loop for var from start to end do body)
+    
+    Génération MIPS:
+      LOOP_START:
+        ; évaluer condition
+        BEQ $cond $zero LOOP_END
+        ; body
+        J LOOP_START
+      LOOP_END:
+    
+    Tests:
+      - Boucle simple compteur
+      - Boucle avec condition complexe
+      - Boucles imbriquées
+
+[ ] 2.2 Implémenter WHILE
+    Fichier: src/compiler-bootstrap.lisp
+    
+    Syntaxe: (while condition body...)
+    
+    Tests:
+      - While avec compteur
+      - While avec break implicite
+      - While infini avec return
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 3 : EXTENSION DU COMPILATEUR - STRUCTURES DE DONNÉES (5-6h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 3.1 Implémenter ARRAYS
+    Fichier: src/compiler-bootstrap.lisp
+    
+    Fonctions à supporter:
+      (make-array size)           → allouer sur le tas
+      (aref array index)          → lecture
+      (setf (aref array index) v) → écriture
+      (array-length array)        → taille
+    
+    Génération MIPS:
+      make-array:
+        - Allouer (size+1) mots sur le tas
+        - Stocker size au mot 0
+        - Retourner adresse de base
+      
+      aref:
+        - LW base_addr
+        - Calculer offset = (index+1)*4
+        - LW value à (base_addr + offset)
+      
+      setf aref:
+        - Calculer adresse cible
+        - SW value
+    
+    Tests:
+      - Créer array, lire/écrire
+      - Arrays imbriqués
+      - Parcours d'array en boucle
+
+[ ] 3.2 Simplifier les HASH-TABLES en ARRAYS ASSOCIATIFS
+    Stratégie: 
+      Hash-table → Array de paires (key, value)
+      gethash → Parcours linéaire de l'array
+    
+    Fonctions:
+      (make-hash-table) → (make-array 100)
+      (gethash key ht) → recherche linéaire
+      (sethash key val ht) → ajout/mise à jour
+    
+    Tests:
+      - Créer, insérer, rechercher
+      - Collisions
+      - Performance acceptable pour <100 entrées
+
+[ ] 3.3 Implémenter DEFSTRUCT (simplifié)
+    Stratégie: Struct → Array avec offsets fixes
+    
+    Exemple:
+      (defstruct vm memory registers state)
+      
+      Génération:
+        vm → array[3]
+          [0] = memory
+          [1] = registers  
+          [2] = state
+      
+      (vm-memory vm) → (aref vm 0)
+      (setf (vm-memory vm) val) → (setf (aref vm 0) val)
+    
+    Tests:
+      - Définir struct
+      - Créer instances
+      - Accesseurs/modificateurs
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 4 : EXTENSION DU COMPILATEUR - CONTRÔLE DE FLUX (3-4h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 4.1 Implémenter CASE
+    Fichier: src/compiler-bootstrap.lisp
+    
+    Syntaxe:
+      (case expr
+        (val1 body1)
+        (val2 body2)
+        (t default))
+    
+    Génération MIPS:
+      ; évaluer expr → $V0
+      LI val1 $T0
+      BEQ $V0 $T0 CASE_1
+      LI val2 $T0
+      BEQ $V0 $T0 CASE_2
+      J CASE_DEFAULT
+      CASE_1:
+        ; body1
+        J CASE_END
+      CASE_2:
+        ; body2
+        J CASE_END
+      CASE_DEFAULT:
+        ; default
+      CASE_END:
+    
+    Tests:
+      - Case avec 2-3 branches
+      - Case avec default
+      - Case imbriqués
+
+[ ] 4.2 Implémenter COND (si pas déjà fait)
+    Syntaxe:
+      (cond
+        (test1 expr1)
+        (test2 expr2)
+        (t default))
+    
+    Tests:
+      - Cond simple
+      - Cond complexe avec calculs
+
+[ ] 4.3 Implémenter RETURN-FROM (optionnel)
+    Pour sortie anticipée de fonctions
+    
+    Génération:
+      - Stocker résultat dans $V0
+      - J vers label de retour fonction
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 5 : GESTION DE LA MÉMOIRE ET DU TAS (4-5h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 5.1 Implémenter l'allocateur de tas (malloc)
+    Fichier: Déjà dans vm-bootstrap.lisp (vm-malloc)
+    
+    À compiler:
+      (defun vm-malloc (vm size)
+        (let ((addr *heap-pointer*))
+          (incf *heap-pointer* size)
+          addr))
+    
+    Nécessite:
+      - Variable globale *heap-pointer*
+      - Incf (déjà supporté via setq)
+
+[ ] 5.2 Gérer les variables globales
+    Variables à supporter:
+      *heap-pointer*
+      *maxmem*
+      *code-size*
+      *heap-start*
+      *heap-size*
+    
+    Stratégie:
+      - Réserver zone mémoire pour globales (adresses fixes)
+      - Accès via LW/SW à adresses connues
+
+[ ] 5.3 Tester allocation mémoire
+    Tests:
+      - Allouer plusieurs blocs
+      - Vérifier pas de collision
+      - Tester limites
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 6 : SIMPLIFICATION DE LA VM (3-4h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 6.1 Créer vm-compilable.lisp
+    Copie de vm-bootstrap.lisp avec simplifications:
+    
+    Changements:
+      - Hash-table registers → Array[40] (un index par registre)
+      - Defstruct vm → Variables globales
+        * vm-memory → array global
+        * vm-state → variable globale
+        * vm-pc → variable globale
+      - Éliminer fonctions auxiliaires complexes
+      - Remplacer récursion par boucles when possible
+
+[ ] 6.2 Encoder les opcodes comme entiers
+    Actuellement: symboles (:ADD, :SUB, etc.)
+    Nouveau: entiers (1=ADD, 2=SUB, etc.)
+    
+    Table de correspondance:
+      (defparameter *opcode-table*
+        '((:ADD . 1) (:SUB . 2) (:MUL . 3) ... (:HALT . 99)))
+    
+    Avantage: Plus facile à compiler (comparaisons d'entiers)
+
+[ ] 6.3 Simplifier execute-instruction
+    Actuellement: Case avec 40+ branches
+    Nouveau: Array de fonctions ou grand if/elsif
+    
+    Structure:
+      (defun execute-instruction (opcode args)
+        (cond
+          ((= opcode 1) (execute-add args))
+          ((= opcode 2) (execute-sub args))
+          ...))
+
+[ ] 6.4 Tester vm-compilable.lisp en LISP natif
+    S'assurer qu'elle fonctionne avant compilation
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 7 : COMPILATION DE LA VM (4-5h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 7.1 Compiler les fonctions auxiliaires
+    Ordre de compilation:
+      1. get-value / set-value
+      2. mem-read / mem-write
+      3. get-register / set-register
+      4. execute-add, execute-sub, etc. (une par opcode)
+      5. execute-instruction (dispatcher)
+      6. run-vm (boucle principale)
+
+[ ] 7.2 Gérer les appels de fonctions en MIPS
+    Nécessite:
+      - Pile pour sauver $RA
+      - Convention d'appel (arguments via $A0-$A3)
+      - Retour via $V0
+    
+    Implémenter dans le compilateur:
+      (compile-function-call name args env)
+
+[ ] 7.3 Compiler la boucle principale run-vm
+    Code LISP:
+      (defun run-vm (vm)
+        (loop while (eq (vm-state vm) :running)
+          do (execute-instruction vm)))
+    
+    Code MIPS:
+      RUN_VM_LOOP:
+        LW $T0 vm_state
+        LI $T1 1          ; :running = 1
+        BNE $T0 $T1 RUN_VM_END
+        JAL EXECUTE_INSTRUCTION
+        J RUN_VM_LOOP
+      RUN_VM_END:
+        JR $RA
+
+[ ] 7.4 Générer le code MIPS complet
+    Structure du fichier généré:
+      .data
+        ; Variables globales
+        vm_memory: .space 4194304  ; 4 Mo
+        vm_state: .word 1          ; :running
+        vm_pc: .word 0
+        ...
+      
+      .text
+        ; Point d'entrée
+        main:
+          JAL RUN_VM
+          HALT
+        
+        ; Fonctions
+        GET_VALUE:
+          ...
+          JR $RA
+        
+        EXECUTE_INSTRUCTION:
+          ...
+          JR $RA
+        
+        RUN_VM:
+          ...
+          JR $RA
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 8 : TESTS ET VALIDATION (3-4h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 8.1 Test unitaire : charger VM compilée dans VM₀
+    Test:
+      - Compiler vm-compilable.lisp → code MIPS
+      - Charger dans VM₀
+      - Vérifier que VM₀ peut charger le code
+
+[ ] 8.2 Test simple : VM₁ exécute programme trivial
+    Programme test: (+ 2 3)
+    
+    Étapes:
+      1. Compiler (+ 2 3) → code MIPS (code_prog)
+      2. Charger code_prog dans mémoire de VM₁
+      3. Compiler VM₁ → code MIPS (code_vm1)
+      4. Charger code_vm1 dans VM₀
+      5. VM₀ exécute code_vm1 qui exécute code_prog
+      6. Vérifier résultat = 5
+
+[ ] 8.3 Test complexe : VM₁ exécute programme avec let/if
+    Programme: (let ((x 10)) (if (> x 5) (* x 2) (+ x 1)))
+
+[ ] 8.4 Tests de performance
+    Comparer:
+      - LISP natif
+      - VM₀ native (LISP) exécute code
+      - VM₁ compilée (MIPS) dans VM₀ exécute code
+    
+    Mesurer overhead VM₁ réelle vs simulation précédente
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 9 : OPTIMISATIONS (2-3h optionnel)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 9.1 Optimiser les accès mémoire
+    - Cache des registres dans variables MIPS
+    - Éviter LW/SW répétés
+
+[ ] 9.2 Optimiser le dispatcher execute-instruction
+    - Utiliser jump table si possible
+    - Inliner les opcodes fréquents
+
+[ ] 9.3 Réduire la taille du code généré
+    - Factoriser les patterns répétés
+    - Utiliser macros MIPS
+
+════════════════════════════════════════════════════════════════════════════
+PHASE 10 : DOCUMENTATION ET FINALISATION (2h)
+════════════════════════════════════════════════════════════════════════════
+
+[ ] 10.1 Documenter le processus de compilation
+      - README explicatif
+      - Exemples d'utilisation
+      - Diagramme d'architecture
+
+[ ] 10.2 Créer script de build automatique
+      build-vm1.lisp qui:
+        1. Charge le compilateur étendu
+        2. Compile vm-compilable.lisp
+        3. Sauvegarde le code MIPS généré
+        4. Lance les tests
+
+[ ] 10.3 Mesures de performance finales
+      - Benchmarks détaillés
+      - Comparaison avant/après
+      - Analyse des résultats
+
+════════════════════════════════════════════════════════════════════════════
+RANGEMENT DU PROJET
+════════════════════════════════════════════════════════════════════════════
+
+Structure proposée:
+
+VirtualMachine_CLISP/
+├── README.md
+├── main.lisp
+│
+├── src/                          # Code source principal
+│   ├── asm-ops.lisp             # Opcodes et constantes
+│   ├── vm.lisp                  # VM complète (avec debug)
+│   ├── vm-bootstrap.lisp        # VM simplifiée (bootstrap)
+│   ├── vm-compilable.lisp       # VM simplifiée compilable (NOUVEAU)
+│   ├── compiler.lisp            # Compilateur original
+│   ├── compiler-bootstrap.lisp  # Compilateur compilé
+│   ├── compiler-extended.lisp   # Compilateur étendu (NOUVEAU)
+│   ├── loader.lisp              # Chargeur original
+│   ├── loader-bootstrap.lisp    # Chargeur bootstrap
+│   ├── primitives.lisp          # Primitives LISP pures
+│   └── utils.lisp               # Utilitaires
+│
+├── tests/                        # Tests
+│   ├── unit/                    # Tests unitaires
+│   │   ├── test-compiler.lisp
+│   │   ├── test-vm.lisp
+│   │   └── test-primitives.lisp
+│   ├── integration/             # Tests d'intégration
+│   │   ├── test-bootstrap.lisp
+│   │   └── test-vm1.lisp        # Tests VM₁ compilée (NOUVEAU)
+│   ├── performance/             # Tests de performance
+│   │   ├── test-performance.lisp
+│   │   └── test-performance-real.lisp
+│   └── validation/              # Validation finale
+│       └── test-validation-finale.lisp
+│
+├── bootstrap/                    # Phase 10 Bootstrap
+│   ├── SUCCES_TOTAL_100%.md
+│   ├── TESTS_VALIDATION_FINALE.md
+│   └── PERFORMANCE_TESTS.md
+│
+├── vm1-compilation/             # Phase 11 VM₁ (NOUVEAU)
+│   ├── PLAN_ACTION.txt          # Ce fichier
+│   ├── extensions/              # Extensions compilateur
+│   │   ├── compile-loop.lisp
+│   │   ├── compile-arrays.lisp
+│   │   ├── compile-case.lisp
+│   │   └── compile-functions.lisp
+│   ├── generated/               # Code MIPS généré
+│   │   ├── vm1.mips            # VM compilée en MIPS
+│   │   └── test-programs/      # Programmes de test
+│   └── benchmarks/              # Résultats benchmarks
+│       └── vm1-performance.txt
+│
+├── docs/                         # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── COMPILATION_PROCESS.md
+│   └── PERFORMANCE_ANALYSIS.md
+│
+├── examples/                     # Exemples
+│   ├── examples.lisp            # Exemples LISP
+│   └── examples-mips.lisp       # Exemples MIPS
+│
+└── archive/                      # Fichiers obsolètes
+    ├── mini-vm.lisp
+    ├── PLAN_VM1_COMPILATION.lisp
+    ├── performance-results-old/
+    └── test-old/
+
+════════════════════════════════════════════════════════════════════════════
+PRIORISATION DES TÂCHES
+════════════════════════════════════════════════════════════════════════════
+
+CRITIQUE (bloquer sans ça):
+  - Phase 2: Boucles (while/loop)
+  - Phase 3: Arrays
+  - Phase 4: Case
+  - Phase 6: Simplification VM
+  - Phase 7: Compilation VM
+
+IMPORTANT (fonctionnalités clés):
+  - Phase 5: Gestion mémoire
+  - Phase 8: Tests validation
+
+OPTIONNEL (améliorations):
+  - Phase 3.2: Hash-tables
+  - Phase 9: Optimisations
+
+════════════════════════════════════════════════════════════════════════════
+ESTIMATION TEMPORELLE TOTALE
+════════════════════════════════════════════════════════════════════════════
+
+Phases critiques:      15-18h
+Phases importantes:     7-9h
+Documentation:          2h
+Rangement:              1h
+Imprévus/debug:         5-6h
+─────────────────────────────
+TOTAL:                 30-36h
+
+Répartition sur 1 semaine (6h/jour): 5-6 jours
+Répartition sur 2 semaines (3h/jour): 10-12 jours
+
+════════════════════════════════════════════════════════════════════════════
+PROCHAINES ÉTAPES IMMÉDIATES
+════════════════════════════════════════════════════════════════════════════
+
+1. [ ] Ranger le projet (structure ci-dessus)
+2. [ ] Analyser vm-bootstrap.lisp (Phase 1)
+3. [ ] Implémenter LOOP/WHILE (Phase 2)
+4. [ ] Implémenter ARRAYS (Phase 3.1)
+5. [ ] Implémenter CASE (Phase 4.1)
+6. [ ] Créer vm-compilable.lisp (Phase 6)
+7. [ ] Compiler première fonction (Phase 7.1)
+
+════════════════════════════════════════════════════════════════════════════
