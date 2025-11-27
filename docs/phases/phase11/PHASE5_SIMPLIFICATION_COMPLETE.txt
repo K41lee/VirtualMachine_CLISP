@@ -1,0 +1,159 @@
+===============================================================================
+PHASE 5 - SIMPLIFICATION VM (vm-compilable.lisp)
+===============================================================================
+Date: 27 novembre 2025
+Statut: ✅ TERMINÉ
+
+OBJECTIF
+--------
+Transformer vm.lisp en vm-compilable.lisp qui utilise UNIQUEMENT des
+constructions supportées par notre compilateur.
+
+TRANSFORMATIONS RÉALISÉES
+-------------------------
+
+✅ 1. HEADER ET CONSTANTES
+   - Ajout d'un header documenté expliquant les simplifications
+   - Définition des constantes d'état:
+     * +state-ready+ = 0
+     * +state-running+ = 1
+     * +state-halted+ = 2
+     * +state-error+ = 3
+
+✅ 2. VARIABLES GLOBALES (remplace DEFSTRUCT)
+   - *vm-memory* : tableau de *maxmem* éléments
+   - *vm-registers* : tableau de 42 registres
+   - *vm-state* : état courant (0-3)
+   - *vm-instruction-count* : compteur d'instructions
+   - *vm-verbose* : mode verbeux
+
+✅ 3. FONCTION REG-INDEX
+   - Convertit symboles de registres en indices (0-41)
+   - Registres généraux MIPS: 0-31 (:$zero à :$ra)
+   - Registres spéciaux: 32-41 (:pc, :hi, :lo, etc.)
+
+✅ 4. SUPPRESSION DEFSTRUCT
+   - defstruct vm supprimé
+   - make-vm remplacé par initialisation directe des variables globales
+   - Tous les accesseurs (vm-memory, vm-registers, etc.) supprimés
+
+✅ 5. HASH-TABLE → ARRAYS
+   - (gethash reg hash) → (aref *vm-registers* (reg-index reg))
+   - (setf (gethash ...)) → (setq (aref *vm-registers* (reg-index reg)) val)
+   - 4 localisations transformées
+
+✅ 6. DOLIST → WHILE
+   - init-registers: boucle 0-41 avec WHILE + compteur
+   - dump-registers: fonction désactivée (pas de FORMAT)
+
+✅ 7. LOOP → WHILE
+   - run-vm: LOOP remplacé par WHILE
+   - dump-memory/dump-stack: fonctions désactivées
+
+✅ 8. SUPPRESSION FORMAT
+   - ~40 appels FORMAT supprimés
+   - Blocs (when (vm-verbose vm) (format ...)) supprimés
+   - PRINT: FORMAT remplacé par simple retour de valeur
+
+✅ 9. KEYWORDS → CONSTANTES
+   - :ready → +state-ready+ (0)
+   - :running → +state-running+ (1)
+   - :halted → +state-halted+ (2)
+   - :error → +state-error+ (3)
+
+✅ 10. PARAMÈTRE VM SUPPRIMÉ
+   - Toutes les fonctions: (defun f (vm ...) → (defun f (...)
+   - Utilisation des variables globales directement
+   - ~150 références transformées
+
+✅ 11. SETF/INCF/DECF → SETQ/ARITHMÉTIQUE
+   - (setf x y) → (setq x y)
+   - (incf x) → (setq x (+ x 1))
+   - (decf x) → (setq x (- x 1))
+
+✅ 12. HANDLER-CASE SUPPRIMÉ
+   - run-vm: gestion d'erreur simplifiée
+   - Changement d'état au lieu de lever des exceptions
+
+✅ 13. EXPORTS ACTUALISÉS
+   - Ajout des variables globales
+   - Ajout des constantes d'état
+   - Ajout de reg-index, fetch-instruction, execute-instruction
+
+VÉRIFICATIONS
+-------------
+
+✅ Pas de DEFSTRUCT
+✅ Pas de HASH-TABLE / GETHASH / SETF-GETHASH
+✅ Pas de DOLIST
+✅ Pas de LOOP
+✅ Pas de FORMAT
+✅ Pas de keywords d'état (:ready, :running, :halted, :error)
+✅ Pas de paramètre vm dans les fonctions
+✅ Pas de SETF (remplacé par SETQ)
+✅ Pas de INCF/DECF (remplacé par arithmétique explicite)
+✅ Pas de HANDLER-CASE
+
+CONSTRUCTIONS UTILISÉES (toutes supportées par le compilateur)
+--------------------------------------------------------------
+
+✓ DEFUN
+✓ DEFVAR
+✓ DEFCONSTANT
+✓ LET
+✓ PROGN
+✓ WHILE (extension compilateur)
+✓ CASE
+✓ COND
+✓ WHEN/UNLESS
+✓ SETQ
+✓ AREF (arrays)
+✓ MAKE-ARRAY
+✓ Arithmétique: +, -, *, /, MOD, TRUNCATE
+✓ Comparaisons: =, <, >, <=, >=, /=
+✓ Logique: AND, OR, NOT
+✓ RETURN-FROM
+✓ ERROR (simplifié)
+
+RÉSULTATS
+---------
+
+Fichier: src/vm-compilable.lisp
+Taille: ~690 lignes (vs 687 dans vm.lisp)
+Chargement: ✅ SUCCÈS (pas d'erreurs de syntaxe)
+État: Prêt pour compilation en MIPS
+
+LIMITATIONS CONNUES
+-------------------
+
+1. WHILE n'est pas une fonction native Common Lisp
+   - Nécessite le compilateur pour être exécutée
+   - Définie comme extension dans compiler.lisp
+
+2. Fonctions de débogage désactivées
+   - dump-registers, dump-memory, dump-stack retournent juste T
+   - Pas de sortie verbeux
+
+3. Gestion d'erreur simplifiée
+   - Pas de HANDLER-CASE
+   - Changement d'état au lieu d'exceptions détaillées
+
+PROCHAINES ÉTAPES
+-----------------
+
+Phase 6: Compiler vm-compilable.lisp vers MIPS
+  - Utiliser (compile-to-mips '(load "vm-compilable.lisp"))
+  - Générer le code MIPS complet
+  - Sauvegarder dans vm-compiled.mips
+
+Phase 7: Tester VM₁ dans VM₀
+  - Charger vm-compiled.mips dans la VM originale
+  - Exécuter des programmes simples
+  - Vérifier le bootstrap
+
+Phase 8: Documentation
+  - Résumé complet du projet
+  - Métriques et statistiques
+  - Guide d'utilisation
+
+===============================================================================
