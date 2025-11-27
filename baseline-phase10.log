@@ -1,0 +1,264 @@
+╔═══════════════════════════════════════════════════════════╗
+║     Exécution de Tous les Tests Unitaires                ║
+╚═══════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-case
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+=== Test 1: CASE simple ===
+✓ Test 1 PASSÉ
+=== Test 2: CASE avec liste de keys ===
+✓ Test 2 PASSÉ
+=== Test 3: CASE avec otherwise ===
+✓ Test 3 PASSÉ
+=== Test 4: CASE première correspondance ===
+✓ Test 4 PASSÉ
+=== Test 5: CASE avec arithmétique ===
+✓ Test 5 PASSÉ
+=== Test 6: CASE imbriqué ===
+✓ Test 6 PASSÉ
+=== Test 7: CASE avec 0 ===
+✓ Test 7 PASSÉ
+=== Test 8: CASE avec négatifs ===
+✓ Test 8 PASSÉ
+║   Tests réussis: 8/8 ║
+[0;32m✅ Fichier: 9 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-closure-call
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+✗ Erreur: 
+✗ Erreur: 
+✗ Erreur: 
+✗ Erreur: 
+✗ Erreur: 
+[0;31m❌ Fichier: 5 tests échoués[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-closures-advanced
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+Tests closures avancés chargés.
+  - (test-closure-3-levels)           : Test 3 niveaux imbrication
+  - (test-closure-multiple-vars)      : Test multiples variables
+  - (test-closure-recursive-capture)  : Test récursion avec capture
+  - (test-closure-setq)               : Test SETQ sur variable capturée
+  - (test-closure-complex)            : Test opérations complexes
+  - (test-closure-let-multiple)       : Test LET multiples captures
+[0;32m✅ Fichier: 1 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-compiler
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+Tests du compilateur chargés. Fonctions disponibles:
+[0;32m✅ Fichier: 1 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-cond
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+=== Test 1: COND simple ===
+✓ Test 1 PASSÉ
+=== Test 2: COND avec clause par défaut ===
+✓ Test 2 PASSÉ
+=== Test 3: COND première clause vraie ===
+✓ Test 3 PASSÉ
+=== Test 4: COND avec arithmétique ===
+✓ Test 4 PASSÉ
+=== Test 5: COND imbriqué ===
+✓ Test 5 PASSÉ
+=== Test 6: COND avec égalité ===
+✓ Test 6 PASSÉ
+║   Tests réussis: 6/6 ║
+[0;32m✅ Fichier: 7 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-dotimes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+=== Test 1: DOTIMES simple ===
+✓ Test 1 PASSÉ
+=== Test 2: DOTIMES count=0 ===
+✓ Test 2 PASSÉ
+=== Test 3: DOTIMES avec résultat ===
+✓ Test 3 PASSÉ
+=== Test 4: DOTIMES imbriquées ===
+(LET ((TOTAL 0)) (DOTIMES (I 3) (DOTIMES (J 4) (SETQ TOTAL (+ TOTAL 1))))
+ TOTAL)
+✓ Test 4 PASSÉ
+=== Test 5: DOTIMES avec arithmétique ===
+✓ Test 5 PASSÉ
+=== Test 6: DOTIMES count expression ===
+✓ Test 6 PASSÉ
+║   Tests réussis: 6/6 ║
+[0;32m✅ Fichier: 7 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-free-variables
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+✓ TEST RÉUSSI
+[0;32m✅ Fichier: 18 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-heap
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+✓ TEST MALLOC SIMPLE: RÉUSSI
+✓ TEST MALLOC MULTIPLE: RÉUSSI
+✓ TEST STORE/LOAD HEAP: RÉUSSI
+✓ TEST STRUCTURE FERMETURE: RÉUSSI
+[0;32m✅ Fichier: 5 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-labels
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+Tests LABELS chargés.
+  - (test-labels-simple)     : Test LABELS non récursif
+  - (test-labels-recursive)  : Test LABELS récursif
+  - (test-labels-mutual)     : Test récursion mutuelle
+  - (test-labels-with-let)   : Test LABELS avec LET
+  - (test-labels-multiple)   : Test plusieurs fonctions
+  - (test-labels-nested)     : Test LABELS imbriqué
+[0;32m✅ Fichier: 1 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-lambda-simple
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+✓ Compilation réussie
+✗ Erreur de compilation: Variable non définie: Y
+✓ Compilation réussie
+✓ Compilation réussie
+[0;31m❌ Fichier: 1 tests échoués[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-let
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+Tests LET chargés.
+  - (test-let-simple)     : Test LET simple
+  - (test-let-multiple)   : Test LET avec multiples variables
+  - (test-let-shadowing)  : Test LET avec shadowing
+  - (test-let-nested)     : Test LET imbriqué
+  - (test-let-with-if)    : Test LET avec IF
+  - (test-let-complex)    : Test LET avec expression complexe
+[0;32m✅ Fichier: 1 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-logical
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Test 1 PASSÉ
+=== Test 2: NOT sur faux ===
+✓ Test 2 PASSÉ
+=== Test 3: AND toutes vraies ===
+✓ Test 3 PASSÉ
+=== Test 4: AND avec un faux ===
+✓ Test 4 PASSÉ
+=== Test 5: AND vide ===
+✓ Test 5 PASSÉ
+=== Test 6: OR toutes fausses ===
+✓ Test 6 PASSÉ
+=== Test 7: OR avec un vrai ===
+✓ Test 7 PASSÉ
+=== Test 8: OR vide ===
+✓ Test 8 PASSÉ
+=== Test 9: Logique combinée ===
+✓ Test 9 PASSÉ
+=== Test 10: Logique avec IF ===
+✓ Test 10 PASSÉ
+║   Tests réussis: 10/10 ║
+[0;32m✅ Fichier: 11 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-loop
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+Tests LOOP chargés.
+  - (test-loop-simple)     : Test LOOP simple
+  - (test-loop-calcul)     : Test LOOP avec accumulation
+  - (test-loop-condition)  : Test LOOP avec condition
+  - (test-loop-nested)     : Test LOOP imbriqué
+  - (test-loop-with-if)    : Test LOOP avec IF
+[0;32m✅ Fichier: 1 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-math
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Test 13: MIN x > y
+✓ PASS
+Test 14: MIN égales
+✓ PASS
+Test 15: MIN négatifs
+✓ PASS
+Test 16: MIN expressions
+✓ PASS
+Test 17: MIN avec zéro
+✓ PASS
+--- Tests combinés ---
+Test 18: ABS + MAX
+✓ PASS
+Test 19: ABS + MIN
+✓ PASS
+Test 20: MAX + MIN
+✓ PASS
+Test 21: Expression complexe
+✓ PASS
+✓ Tous les tests sont passés!
+[0;32m✅ Fichier: 23 tests réussis[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 Test: test-when-unless
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Compilateur chargé avec succès!
+=== Test 1: WHEN condition vraie ===
+✓ Test 1 PASSÉ
+=== Test 2: WHEN condition fausse ===
+✓ Test 2 PASSÉ
+=== Test 3: WHEN avec plusieurs expressions ===
+✓ Test 3 PASSÉ
+=== Test 4: UNLESS condition vraie ===
+✓ Test 4 PASSÉ
+=== Test 5: UNLESS condition fausse ===
+✓ Test 5 PASSÉ
+=== Test 6: UNLESS avec plusieurs expressions ===
+✓ Test 6 PASSÉ
+=== Test 7: WHEN et UNLESS imbriqués ===
+✓ Test 7 PASSÉ
+║   Tests réussis: 7/7 ║
+[0;32m✅ Fichier: 8 tests réussis[0m
+
+╔═══════════════════════════════════════════════════════════╗
+║                  RÉSUMÉ FINAL                             ║
+╚═══════════════════════════════════════════════════════════╝
+
+Fichiers testés  : 15
+Fichiers réussis : 13
+
+Tests totaux     : 104
+Tests réussis    : [0;32m98 ✓[0m
+Tests échoués    : [0;31m6 ✗[0m
+
+Taux de réussite : 94%
+
+[1;33m⚠️  Certains tests ont échoué ou aucun test n'a été exécuté.[0m

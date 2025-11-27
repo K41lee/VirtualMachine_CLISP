@@ -10,7 +10,8 @@ Développer un système permettant de :
 3. **Supporter** les closures et la récursivité
 4. **Comparer** les performances avec LISP natif
 
-**Statut** : ✅ **PHASE 9 COMPLÉTÉE** - Closures fonctionnelles avec 100% des tests passants
+**Statut** : ✅ **PHASE 9 COMPLÉTÉE** - Closures fonctionnelles avec 100% des tests passants  
+**Phase 10** : 🚀 **BOOTSTRAP EN COURS** - Auto-compilation démarrée (27 nov. 2025)
 
 ## 📦 Structure du Projet
 
