@@ -1,0 +1,440 @@
+================================================================================
+ANALYSE DÉTAILLÉE DES CONSTRUCTS LISP DANS src/vm.lisp
+================================================================================
+
+Date: 27 novembre 2025
+Fichier analysé: src/vm.lisp (686 lignes)
+Objectif: Identifier tous les constructs LISP à supporter pour compiler la VM
+
+================================================================================
+RÉSUMÉ EXÉCUTIF
+================================================================================
+
+Fichier: src/vm.lisp
+Lignes: 686
+Fonctions: 35
+Complexité: MOYENNE-HAUTE
+
+Constructs LISP identifiés:
+- ✅ SUPPORTÉS: defun, defparameter, defconstant, let, let*, if, cond, case, when, unless
+- ✅ SUPPORTÉS: and, or, not, setf, setq, +, -, *, /, <, >, =, /=, <=, >=
+- ✅ SUPPORTÉS: quote, list, first, second, third, rest, length, null
+- ⚠️ PARTIELLEMENT: loop, dolist
+- ❌ NON SUPPORTÉS: defstruct, make-array, aref, make-hash-table, gethash
+- ❌ NON SUPPORTÉS: handler-case, error, format, export, load
+
+================================================================================
+1. STRUCTURES DE DONNÉES
+================================================================================
+
+1.1. DEFSTRUCT (❌ NON SUPPORTÉ)
+   ---------------------------------
+   Ligne 49-59: (defstruct vm ...)
+   
+   Utilisation:
+   - Définit la structure principale 'vm' avec 5 champs:
+     * memory: tableau (make-array)
+     * registers: hash-table
+     * state: keyword (:ready/:running/:halted/:error)
+     * instruction-count: integer
+     * verbose: boolean
+   
+   Fonctions générées automatiquement par defstruct:
+   - make-vm: constructeur
+   - vm-memory: accesseur pour memory
+   - vm-registers: accesseur pour registers
+   - vm-state: accesseur pour state
+   - vm-instruction-count: accesseur pour instruction-count
+   - vm-verbose: accesseur pour verbose
+   
+   Solution de remplacement:
+   → Utiliser une liste avec accesseurs manuels
+   → Ou utiliser des variables globales (simplification)
+
+1.2. MAKE-ARRAY (❌ NON SUPPORTÉ)
+   ---------------------------------
+   Ligne 51: (make-array *maxmem* :initial-element 0)
+   Ligne 103: (make-array *maxmem* :initial-element 0)
+   
+   Utilisation:
+   - Créer la mémoire de la VM (tableau de *maxmem* éléments)
+   - :initial-element 0 pour initialiser à zéro
+   
+   Solution de remplacement:
+   → Implémenter make-array comme fonction primitive
+   → Allocation sur le tas avec métadonnées
+
+1.3. AREF (❌ NON SUPPORTÉ)
+   ---------------------------------
+   Lignes utilisées: 191, 193, 251, 263
+   
+   Utilisation:
+   - (aref (vm-memory vm) addr): lire la mémoire
+   - (setf (aref (vm-memory vm) addr) value): écrire la mémoire
+   
+   Solution de remplacement:
+   → Implémenter aref comme fonction primitive
+   → Accès mémoire avec offset calculé
+
+1.4. HASH-TABLE (❌ NON SUPPORTÉ)
+   ---------------------------------
+   Ligne 52: (make-hash-table :test 'eq)
+   Lignes utilisées: gethash (136, 141, 147), setf gethash (75, 148)
+   
+   Utilisation:
+   - Stockage des 40 registres de la VM
+   - Clé: symbole de registre (ex: :$t0)
+   - Valeur: valeur du registre
+   
+   Solution de remplacement:
+   → Utiliser un tableau de 40 éléments (plus simple)
+   → Index = numéro de registre (mapping symbole → index)
+
+================================================================================
+2. VARIABLES GLOBALES
+================================================================================
+
+2.1. DEFPARAMETER (✅ SUPPORTÉ)
+   ------------------------------
+   Ligne 14: (defparameter *heap-pointer* +heap-start+ ...)
+   
+   Utilisation: 1 variable globale pour le tas dynamique
+   
+   Solution: Déjà supporté par le compilateur
+
+2.2. DEFCONSTANT (✅ SUPPORTÉ)
+   -----------------------------
+   Ligne 17: (defconstant +heap-limit+ ...)
+   
+   Utilisation: 1 constante pour la limite du tas
+   
+   Solution: Traiter comme defparameter (valeur constante)
+
+================================================================================
+3. FONCTIONS (DEFUN)
+================================================================================
+
+Nombre total: 35 fonctions
+
+3.1. Fonctions simples (✅ SUPPORTÉES)
+   ------------------------------------
+   - reset-heap (ligne 20)
+   - check-memory-bounds (ligne 181)
+   - calculate-code-start (ligne 223)
+   - map-old-register (ligne 121)
+   - get-value (ligne 315)
+   - set-value (ligne 333)
+   
+   Caractéristiques: if/when/unless, let/let*, arithmétique simple
+
+3.2. Fonctions avec COND/CASE (✅ SUPPORTÉES)
+   -------------------------------------------
+   - get-value (ligne 315): COND avec 3 branches
+   - map-old-register (ligne 121): CASE avec 10+ cas
+   - execute-instruction (ligne 345): CASE avec 50+ opcodes
+   
+   Caractéristiques: Utilisation intensive de COND et CASE
+
+3.3. Fonctions avec LOOP (⚠️ PARTIELLEMENT SUPPORTÉ)
+   --------------------------------------------------
+   - dump-memory (ligne 253): LOOP simple
+   - dump-stack (ligne 296): LOOP simple
+   - run-vm (ligne 668): LOOP avec WHILE
+   
+   Exemples:
+   ```lisp
+   ;; LOOP simple avec FOR
+   (loop for addr from start to end
+         for value = (aref array addr)
+         unless (zerop value)
+         do (format ...))
+   
+   ;; LOOP avec WHILE
+   (loop while (eq (vm-state vm) :running)
+         do (when (>= ...)
+              (error ...))
+            (let ((instr ...))
+              (execute-instruction vm instr)
+              (incf counter)))
+   ```
+   
+   Fonctionnalités LOOP requises:
+   - LOOP ... FOR var FROM start TO end
+   - LOOP ... FOR var = expr
+   - LOOP ... WHILE condition
+   - LOOP ... DO body
+   - LOOP ... UNLESS condition DO ...
+
+3.4. Fonctions avec DOLIST (⚠️ PARTIELLEMENT SUPPORTÉ)
+   ----------------------------------------------------
+   - init-registers (ligne 72): DOLIST simple
+   - dump-registers (ligne 155): DOLIST simple
+   
+   Exemple:
+   ```lisp
+   (dolist (reg *register-names*)
+     (setf (gethash reg (vm-registers vm)) 0))
+   ```
+   
+   Fonctionnalités DOLIST requises:
+   - DOLIST (var list) body
+
+================================================================================
+4. STRUCTURES DE CONTRÔLE
+================================================================================
+
+4.1. IF/WHEN/UNLESS (✅ SUPPORTÉS)
+   --------------------------------
+   Utilisés partout dans le code
+   Déjà supportés par le compilateur
+
+4.2. COND (✅ SUPPORTÉ)
+   ---------------------
+   - get-value (ligne 315)
+   - Plusieurs autres fonctions
+   
+   Déjà supporté par le compilateur
+
+4.3. CASE (✅ SUPPORTÉ partiellement)
+   -----------------------------------
+   - map-old-register (ligne 121): CASE avec 12 branches
+   - execute-instruction (ligne 345): CASE avec 50+ branches
+   
+   ⚠️ ATTENTION: Le compilateur actuel supporte CASE mais peut nécessiter
+   optimisations pour gérer 50+ branches efficacement
+
+4.4. AND/OR (✅ SUPPORTÉS)
+   ------------------------
+   Utilisés pour les conditions
+   Déjà supportés avec court-circuit
+
+4.5. RETURN-FROM (⚠️ À VÉRIFIER)
+   ------------------------------
+   Lignes: 387, 442, 453, 463, 479, 495, 511, 522, 532, 542, 565, 575, 
+           593, 611, 625, 635, 645, 656, 682, 693
+   
+   Utilisation: Sortie prématurée de fonctions (notamment execute-instruction)
+   
+   Exemple:
+   ```lisp
+   (defun execute-instruction (vm instr)
+     (case opcode
+       (:HALT (setf (vm-state vm) :halted)
+              (return-from execute-instruction))
+       ...))
+   ```
+   
+   Solution: RETURN-FROM est un construct spécial Common LISP
+   → Peut être émulé avec des labels et sauts
+   → Ou restructurer le code pour éviter RETURN-FROM
+
+================================================================================
+5. OPÉRATIONS
+================================================================================
+
+5.1. Arithmétique (✅ SUPPORTÉES)
+   -------------------------------
+   +, -, *, /, truncate, mod, 1+, 1-
+   Toutes supportées
+
+5.2. Comparaison (✅ SUPPORTÉES)
+   ------------------------------
+   =, /=, <, >, <=, >=, zerop, null
+   Toutes supportées
+
+5.3. Logique (✅ SUPPORTÉES)
+   --------------------------
+   and, or, not, eq
+   Toutes supportées
+
+5.4. Liste (✅ SUPPORTÉES)
+   -----------------------
+   first, second, third, rest, length
+   Déjà supportées
+
+5.5. Affectation (✅ SUPPORTÉES)
+   ------------------------------
+   setf, setq, incf
+   Déjà supportées
+
+================================================================================
+6. FONCTIONS SPÉCIALES NON SUPPORTÉES
+================================================================================
+
+6.1. ERROR (❌ NON SUPPORTÉ)
+   --------------------------
+   Lignes: 27, 185, 187, 208, 238, 273, 344, 390, 413, 458, 681, 686
+   
+   Utilisation: Gestion d'erreurs
+   
+   Solution temporaire:
+   → Remplacer par (print "ERREUR: ...") et HALT
+   → Ou simplifier la logique pour éviter les erreurs
+
+6.2. FORMAT (❌ NON SUPPORTÉ)
+   ---------------------------
+   Utilisé partout pour le debug (mode verbose)
+   
+   Solution:
+   → Remplacer par des PRINT simples
+   → Ou supprimer complètement le mode verbose
+
+6.3. HANDLER-CASE (❌ NON SUPPORTÉ)
+   ----------------------------------
+   Ligne 674: (handler-case (loop ...) (error (e) ...))
+   
+   Utilisation: Capturer les erreurs dans run-vm
+   
+   Solution:
+   → Simplifier: supprimer le handler-case
+   → Laisser les erreurs se propager
+
+6.4. LOAD (❌ NON SUPPORTÉ)
+   -------------------------
+   Ligne 3: (load "src/asm-ops.lisp")
+   
+   Solution:
+   → Intégrer le contenu de asm-ops.lisp directement
+   → Ou charger avant la compilation
+
+6.5. EXPORT (❌ NON SUPPORTÉ)
+   ---------------------------
+   Ligne 702: (export '(...))
+   
+   Solution:
+   → Supprimer (pas nécessaire pour VM compilée)
+
+================================================================================
+7. OPTIMISATIONS POSSIBLES
+================================================================================
+
+7.1. Simplifier la structure VM
+   -----------------------------
+   Au lieu de defstruct + hash-table:
+   ```lisp
+   ;; Variables globales
+   (defparameter *vm-memory* (make-array *maxmem*))
+   (defparameter *vm-registers* (make-array 40))
+   (defparameter *vm-state* :ready)
+   (defparameter *vm-instruction-count* 0)
+   (defparameter *vm-verbose* nil)
+   ```
+   
+   Avantages:
+   - Plus simple à compiler
+   - Accès direct sans hash-table
+   - Pas de defstruct à gérer
+
+7.2. Remplacer LOOP par WHILE
+   ---------------------------
+   ```lisp
+   ;; Au lieu de:
+   (loop while condition do body)
+   
+   ;; Utiliser:
+   (while condition body)
+   ```
+
+7.3. Remplacer CASE par COND
+   --------------------------
+   Pour execute-instruction, CASE avec 50+ branches peut être
+   remplacé par COND (déjà supporté)
+
+7.4. Remplacer hash-table par tableau
+   -----------------------------------
+   ```lisp
+   ;; Au lieu de:
+   (gethash :$t0 registers-hash)
+   
+   ;; Utiliser:
+   (aref registers-array (register-index :$t0))
+   ```
+
+================================================================================
+8. PLAN D'ACTION - EXTENSIONS NÉCESSAIRES
+================================================================================
+
+PRIORITÉ 1 (CRITIQUE - 8-10h):
+   ✅ 1.1. WHILE loops (3-4h)
+      - Implémenter (while condition body)
+      - Remplacer LOOP ... WHILE dans run-vm
+   
+   ❌ 1.2. ARRAYS (3-4h)
+      - make-array pour la mémoire
+      - aref pour accès mémoire
+      - setf aref pour écriture
+   
+   ⚠️ 1.3. DOLIST (2h)
+      - (dolist (var list) body)
+      - Peut être remplacé par while + rest
+
+PRIORITÉ 2 (IMPORTANTE - 5-6h):
+   ❌ 2.1. Simplification VM (3-4h)
+      - Remplacer defstruct par variables globales
+      - Remplacer hash-table par tableau pour registres
+      - Simplifier les accesseurs
+   
+   ⚠️ 2.2. CASE optimisé (2h)
+      - Vérifier que CASE gère 50+ branches
+      - Ou remplacer par COND optimisé
+
+PRIORITÉ 3 (OPTIONNELLE - 3-4h):
+   ⚠️ 3.1. RETURN-FROM (2h)
+      - Émulation avec labels/sauts
+      - Ou restructurer le code
+   
+   ⚠️ 3.2. Mode verbose (1-2h)
+      - Simplifier FORMAT en PRINT
+      - Ou supprimer complètement
+
+================================================================================
+9. ESTIMATION GLOBALE
+================================================================================
+
+Extensions compilateur:     10-12h
+Simplification VM:          5-6h
+Restructuration code:       3-4h
+Tests et validation:        4-5h
+Documentation:              2h
+                           --------
+TOTAL:                     24-29h
+
+================================================================================
+10. STRATÉGIE RECOMMANDÉE
+================================================================================
+
+APPROCHE 1: VM Simplifiée (RECOMMANDÉE)
+   → Créer vm-compilable.lisp (version simplifiée)
+   → Remplacer defstruct par variables globales
+   → Remplacer hash-table par tableau
+   → Remplacer LOOP par WHILE
+   → Supprimer mode verbose (ou simplifier)
+   → Estimation: 18-22h
+
+APPROCHE 2: VM Complète
+   → Compiler vm.lisp tel quel
+   → Implémenter toutes les extensions
+   → Plus complexe mais plus fidèle
+   → Estimation: 28-35h
+
+================================================================================
+11. PROCHAINES ÉTAPES
+================================================================================
+
+Phase 11.2: Implémenter WHILE loops
+Phase 11.3: Implémenter ARRAYS
+Phase 11.4: Créer vm-compilable.lisp (version simplifiée)
+Phase 11.5: Compiler vm-compilable.lisp en MIPS
+Phase 11.6: Tester VM₁ dans VM₀
+
+================================================================================
+FIN DE L'ANALYSE
+================================================================================
+
+Résumé:
+- 35 fonctions à compiler
+- 5 extensions critiques (WHILE, ARRAYS, DOLIST, CASE optimisé, simplification)
+- 3 extensions optionnelles (RETURN-FROM, FORMAT simplifié)
+- Estimation: 24-29h avec simplification, 28-35h sans simplification
+
+Recommandation: Approche 1 (VM Simplifiée) pour Phase 11

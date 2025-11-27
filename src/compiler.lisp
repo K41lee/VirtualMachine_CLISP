@@ -220,14 +220,14 @@ qui a défini la fonction, ou NIL si non trouvée."
     ((numberp expr) 
      (list :constant expr))
     
-    ((symbolp expr)
-     (list :variable expr))
-    
     ((null expr)
-     (list :constant 0))  ; nil = 0
+     (list :constant 0))  ; nil = 0 (DOIT être avant symbolp car NIL est un symbole)
     
     ((eq expr t)
-     (list :constant 1))  ; t = 1
+     (list :constant 1))  ; t = 1 (DOIT être avant symbolp car T est un symbole)
+    
+    ((symbolp expr)
+     (list :variable expr))
     
     ((lisp-list-p expr)
      (let ((op (first expr))
@@ -289,6 +289,19 @@ qui a défini la fonction, ou NIL si non trouvée."
                    (eq (third args) 'do))
               (list :loop-while (second args) (cdddr args))
               (error "Syntaxe LOOP non supportée: ~A" expr)))
+         
+         ;; Structure WHILE (PHASE 11 - Extension pour VM compilation)
+         (while
+          ;; Syntaxe: (while condition body...)
+          (if (>= (length args) 2)
+              (list :while (first args) (rest args))
+              (error "Syntaxe WHILE incorrecte: ~A" expr)))
+         
+         ;; Structure PROGN (PHASE 11 - Séquence d'expressions)
+         (progn
+          ;; Syntaxe: (progn expr1 expr2 ... exprN)
+          ;; Évalue chaque expression en séquence, retourne le résultat de la dernière
+          (list :progn args))
          
          ;; Structure DOTIMES
          (dotimes
@@ -1216,6 +1229,56 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     code))
 
+(defun compile-while (condition body env)
+  "Compile (while condition body...)
+   PHASE 11 - Extension pour compilation de la VM
+   Syntaxe simplifiée sans 'do' (contrairement à LOOP WHILE)
+   Génère une boucle avec labels et branches conditionnelles"
+  (let ((label-start (gen-label env "WHILE_START"))
+        (label-end (gen-label env "WHILE_END"))
+        (code '()))
+    
+    ;; Label début de boucle
+    (setf code (append code (list (list :LABEL label-start))))
+    
+    ;; Compiler la condition
+    (setf code (append code (compile-expr condition env)))
+    
+    ;; Si condition = 0 (faux), sortir de la boucle
+    (setf code (append code
+                      (list (list :BEQ *reg-v0* *reg-zero* label-end))))
+    
+    ;; Compiler le corps de la boucle (plusieurs expressions)
+    (dolist (expr body)
+      (setf code (append code (compile-expr expr env))))
+    
+    ;; Retour au début de la boucle
+    (setf code (append code
+                      (list (list :J label-start))))
+    
+    ;; Label fin de boucle
+    (setf code (append code
+                      (list (list :LABEL label-end))))
+    
+    ;; Le résultat d'un WHILE est nil (0)
+    (setf code (append code
+                      (list (list :MOVE *reg-zero* *reg-v0*))))
+    
+    code))
+
+(defun compile-progn (exprs env)
+  "Compile (progn expr1 expr2 ... exprN)
+   PHASE 11 - Extension pour séquences d'expressions
+   Évalue chaque expression dans l'ordre, retourne le résultat de la dernière"
+  (let ((code '()))
+    (if (null exprs)
+        ;; PROGN vide retourne 0 (nil)
+        (setf code (list (list :MOVE *reg-zero* *reg-v0*)))
+        ;; Compiler chaque expression en séquence
+        (dolist (expr exprs)
+          (setf code (append code (compile-expr expr env)))))
+    code))
+
 (defun compile-dotimes (var-spec body env)
   "Compile (dotimes (var count [result]) body...)
    Syntaxe: (dotimes (i 10) (print i)) - boucle i de 0 à 9
@@ -1679,6 +1742,12 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       (:loop-while
        (compile-loop-while (second parsed) (third parsed) env))
+      
+      (:while
+       (compile-while (second parsed) (third parsed) env))
+      
+      (:progn
+       (compile-progn (second parsed) env))
       
       (:dotimes
        (compile-dotimes (second parsed) (third parsed) env))

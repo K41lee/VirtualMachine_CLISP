@@ -1,0 +1,205 @@
+================================================================================
+CORRECTIONS BUGS PHASE 11 - WHILE ET PROGN
+================================================================================
+
+Date: 27 novembre 2025
+Durée: ~30 minutes
+Résultat: ✅ 10/10 tests WHILE passent
+
+================================================================================
+BUGS CORRIGÉS
+================================================================================
+
+BUG #1: NIL non reconnu comme constante
+----------------------------------------
+**Symptôme**: 
+  Test 4 échouait avec "Variable non définie: NIL"
+  Expression: (while nil (setq x 99))
+
+**Cause**: 
+  Dans parse-lisp-expr, NIL était traité comme un symbole (variable)
+  avant d'être reconnu comme une constante.
+  
+  Ordre du COND:
+  1. (numberp expr) -> :constant
+  2. (symbolp expr) -> :variable  ⚠️ NIL est un symbole !
+  3. (null expr) -> :constant      ❌ Jamais atteint
+
+**Solution**:
+  Réordonner les tests dans parse-lisp-expr pour vérifier NULL et T
+  AVANT symbolp.
+  
+  Nouvel ordre:
+  1. (numberp expr) -> :constant
+  2. (null expr) -> :constant 0    ✅ AVANT symbolp
+  3. (eq expr t) -> :constant 1    ✅ AVANT symbolp  
+  4. (symbolp expr) -> :variable
+
+**Fichier**: src/compiler.lisp, lignes 218-230
+
+**Code modifié**:
+```lisp
+(defun parse-lisp-expr (expr)
+  "Parse une expression LISP et retourne son type"
+  (cond
+    ((numberp expr) 
+     (list :constant expr))
+    
+    ((null expr)
+     (list :constant 0))  ; nil = 0 (DOIT être avant symbolp)
+    
+    ((eq expr t)
+     (list :constant 1))  ; t = 1 (DOIT être avant symbolp)
+    
+    ((symbolp expr)
+     (list :variable expr))
+    ...
+```
+
+**Tests affectés**: Test 4 (while nil ...)
+**Résultat**: ✅ Test 4 passe maintenant
+
+
+BUG #2: PROGN non supporté
+---------------------------
+**Symptôme**:
+  Tests 2, 5, 6, 7, 8 échouaient avec des résultats incorrects
+  Expression exemple: (while (< x 3) (progn (setq y (+ y x)) (setq x (+ x 1))))
+  Résultat attendu: y=3, obtenu: y=1
+
+**Cause**:
+  PROGN n'était pas du tout implémenté dans le compilateur.
+  Quand le parser voyait (progn expr1 expr2), il essayait de le traiter
+  comme un appel de fonction "progn" qui n'existe pas.
+  Résultat: seule la première expression était compilée.
+
+**Solution**:
+  1. Ajouter PROGN dans le parser (parse-lisp-expr)
+  2. Créer la fonction compile-progn
+  3. Ajouter le cas :progn dans compile-expr
+
+**Fichier**: src/compiler.lisp
+
+**Modification 1: Parser**
+Ligne ~303, ajout dans le CASE du parser:
+```lisp
+;; Structure PROGN (PHASE 11 - Séquence d'expressions)
+(progn
+ ;; Syntaxe: (progn expr1 expr2 ... exprN)
+ ;; Évalue chaque expression en séquence, retourne le résultat de la dernière
+ (list :progn args))
+```
+
+**Modification 2: Fonction de compilation**
+Ligne ~1268, avant compile-dotimes:
+```lisp
+(defun compile-progn (exprs env)
+  "Compile (progn expr1 expr2 ... exprN)
+   PHASE 11 - Extension pour séquences d'expressions
+   Évalue chaque expression dans l'ordre, retourne le résultat de la dernière"
+  (let ((code '()))
+    (if (null exprs)
+        ;; PROGN vide retourne 0 (nil)
+        (setf code (list (list :MOVE *reg-zero* *reg-v0*)))
+        ;; Compiler chaque expression en séquence
+        (dolist (expr exprs)
+          (setf code (append code (compile-expr expr env)))))
+    code))
+```
+
+**Modification 3: Intégration dans compile-expr**
+Ligne ~1745, après :while:
+```lisp
+(:progn
+ (compile-progn (second parsed) env))
+```
+
+**Tests affectés**: Tests 2, 5, 6, 7, 8
+**Résultat**: ✅ Tous les tests passent maintenant
+
+================================================================================
+RÉSUMÉ DES MODIFICATIONS
+================================================================================
+
+Fichier modifié: src/compiler.lisp
+Lignes modifiées: 
+  - Lignes 218-230: Réordonnancement parse-lisp-expr (NIL/T avant symbolp)
+  - Ligne ~303: Ajout case 'progn' dans parser
+  - Lignes ~1268-1281: Ajout fonction compile-progn
+  - Ligne ~1745: Ajout case :progn dans compile-expr
+
+Nouveaux constructs supportés:
+  ✅ NIL et T comme constantes (correctement ordonnés)
+  ✅ PROGN (séquence d'expressions)
+
+================================================================================
+TESTS AVANT/APRÈS
+================================================================================
+
+AVANT corrections:
+  Tests réussis:  4/10
+  Tests échoués:  6/10
+  - Test 2: FAIL (attendu 55, obtenu 2)
+  - Test 4: ERREUR (Variable non définie: NIL)
+  - Test 5: FAIL (attendu 3, obtenu 1)
+  - Test 6: FAIL (attendu 9, obtenu 1)
+  - Test 7: FAIL (attendu 120, obtenu 4)
+  - Test 8: FAIL (attendu 5, obtenu 9)
+
+APRÈS corrections:
+  Tests réussis:  10/10 ✅
+  Tests échoués:  0/10
+  
+  ✅ Test 1: Boucle simple 0 à 5
+  ✅ Test 2: Somme 1 à 10 (55)
+  ✅ Test 3: Boucle jamais exécutée
+  ✅ Test 4: Condition constante nil
+  ✅ Test 5: Body multiple
+  ✅ Test 6: Boucles imbriquées (9)
+  ✅ Test 7: Factorielle 5 (120)
+  ✅ Test 8: Condition composée
+  ✅ Test 9: Compteur double condition
+  ✅ Test 10: Résultat WHILE = nil
+
+================================================================================
+IMPACT SUR LE PROJET
+================================================================================
+
+Extensions compilateur complètes:
+  ✅ WHILE loops (Phase 11.2) - 100% fonctionnel
+  ✅ PROGN sequences (bonus) - 100% fonctionnel
+
+Prochaines étapes:
+  ⏸️ ARRAYS (make-array, aref) - Phase 11.3
+  ⏸️ DOLIST - Phase 11.4
+  ⏸️ VM simplifiée - Phase 11.5
+
+Pourcentage Phase 11 complété: ~25%
+
+================================================================================
+NOTES TECHNIQUES
+================================================================================
+
+1. Ordre d'évaluation dans COND:
+   - Les tests sont évalués séquentiellement
+   - Toujours placer les tests les plus spécifiques en premier
+   - NIL et T sont des symboles, donc tester avant symbolp
+
+2. PROGN vs séquence implicite:
+   - (progn expr1 expr2) évalue tout, retourne dernière valeur
+   - Nécessaire pour body de boucles avec plusieurs instructions
+   - Différent de (let () expr1 expr2) qui évalue aussi tout
+
+3. Performance:
+   - PROGN n'ajoute aucun overhead (pas de code extra)
+   - Simple concaténation des codes générés
+   - Résultat dans $v0 (dernière expression)
+
+4. Compatibilité:
+   - PROGN est un construct LISP standard
+   - Utilisé dans WHEN, UNLESS, COND, etc.
+   - Important pour la compilation de vm.lisp
+
+================================================================================
+FIN DU RAPPORT
+================================================================================
