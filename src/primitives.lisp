@@ -218,6 +218,49 @@
   t)
 
 ;;; ============================================================================
+;;; PRIMITIVES SUPPLÉMENTAIRES POUR LE LOADER (Phase 10 Étape 2)
+;;; ============================================================================
+
+(defun my-every (predicate lst)
+  "Vérifie que tous les éléments d'une liste satisfont le prédicat.
+   Retourne T si tous les éléments satisfont predicate, NIL sinon.
+   Équivalent à (every predicate lst)."
+  (cond
+    ((null lst) t)  ; Liste vide -> tous les éléments satisfont (vacuité)
+    ((not (funcall predicate (car lst))) nil)  ; Un élément échoue
+    (t (my-every predicate (cdr lst)))))  ; Récursion sur le reste
+
+(defun my-acons (key value alist)
+  "Ajoute une paire (key . value) au début d'une liste d'association.
+   Équivalent à (acons key value alist).
+   
+   Exemple: (my-acons 'x 10 '((a 1) (b 2))) -> ((x . 10) (a 1) (b 2))"
+  (cons (cons key value) alist))
+
+(defun my-map-alist (fn alist)
+  "Applique une fonction à chaque paire (key . value) d'une liste d'association.
+   fn doit accepter deux arguments: key et value.
+   Équivalent à (maphash fn hash-table) mais pour listes d'association.
+   
+   Exemple: (my-map-alist (lambda (k v) (print (list k v))) '((a . 1) (b . 2)))"
+  (cond
+    ((null alist) nil)
+    (t 
+     (let ((pair (car alist)))
+       (funcall fn (car pair) (cdr pair))
+       (my-map-alist fn (cdr alist))))))
+
+(defun my-nreverse (lst)
+  "Inverse une liste de manière destructive (mais ici non-destructive pour bootstrap).
+   Équivalent à (nreverse lst)."
+  (my-reverse lst))  ; On utilise la version non-destructive
+
+(defun my-hash-table-count (alist)
+  "Retourne le nombre d'éléments dans une liste d'association.
+   Émule (hash-table-count hash-table)."
+  (my-length alist))
+
+;;; ============================================================================
 ;;; COMPARAISON AVEC FONCTIONS NATIVES (optionnel, pour validation)
 ;;; ============================================================================
 
