@@ -31,42 +31,6 @@
   "État d'erreur - Erreur d'exécution")
 
 ;;; ============================================================================
-;;; CONSTANTES MÉMOIRE (depuis asm-ops.lisp)
-;;; ============================================================================
-
-(defparameter *maxmem* 1048576
-  "Taille maximale de la mémoire (1 Mo)")
-
-(defparameter *heap-size* 2000
-  "Taille du tas dynamique")
-
-(defparameter *stack-size* 2000
-  "Taille de la pile")
-
-(defparameter *code-size* 5000
-  "Taille de la zone code")
-
-(defconstant +registers-start+ 1
-  "Adresse de début de la zone registres")
-
-(defconstant +registers-size+ 160
-  "Taille de la zone registres (40 registres × 4 octets)")
-
-(defconstant +heap-start+ (+ +registers-start+ +registers-size+)
-  "Adresse de début du tas dynamique")
-
-(defparameter *register-names*
-  '(:$zero :$at :$v0 :$v1 
-    :$a0 :$a1 :$a2 :$a3
-    :$t0 :$t1 :$t2 :$t3 :$t4 :$t5 :$t6 :$t7
-    :$s0 :$s1 :$s2 :$s3 :$s4 :$s5 :$s6 :$s7
-    :$t8 :$t9 :$k0 :$k1
-    :$gp :$sp :$fp :$ra
-    :$pc :$hi :$lo :$cc
-    :$gt :$lt :$eq :$ne)
-  "Noms symboliques des registres MIPS")
-
-;;; ============================================================================
 ;;; VARIABLES GLOBALES DE LA VM (remplace DEFSTRUCT)
 ;;; ============================================================================
 
@@ -137,9 +101,9 @@
 ;;; INITIALISATION
 ;;; ============================================================================
 
-(defun make-new-vm ()
+(defun make-new-vm (&key (verbose nil))
   "Crée et initialise une nouvelle VM (utilise les variables globales)"
-  (setq *vm-verbose* nil)
+  (setq *vm-verbose* verbose)
   (setq *vm-state* +state-ready+)
   (setq *vm-instruction-count* 0)
   (setq *vm-memory* (make-array *maxmem* :initial-element 0))
@@ -159,7 +123,7 @@
   (set-register (get-reg :zero) 0)                         ; $zero est toujours 0
   (set-register (get-reg :sp) (- *maxmem* *code-size* 1))  ; Stack pointer
   (set-register (get-reg :fp) (get-register (get-reg :sp)))      ; Frame pointer
-  (set-register (get-reg :gp) +heap-start+)                ; Global pointer (pour le tas)
+  (set-register (nth 28 *register-names*) +heap-start+)                ; Global pointer (pour le tas)
   (set-register (get-reg :pc) 0)                           ; Program counter
   (set-register (get-reg :ra) 0))                          ; Return address
 
@@ -273,10 +237,10 @@
 
 (defun pop-stack ()
   "Dépile et retourne une valeur de la pile"
-  (let ((sp (get-register :$sp)))
-    (let ((value (mem-read (+ sp 1))))
-      (set-register :$sp (+ sp 1))
-      value)))
+  (let* ((sp (get-register :$sp))
+         (value (mem-read (+ sp 1))))
+    (set-register :$sp (+ sp 1))
+    value))
 
 (defun peek-stack (offset)
   "Lit une valeur de la pile sans dépiler"
@@ -297,12 +261,6 @@
   (let ((pc (get-register (get-reg :pc))))
     (mem-read pc)))
 
-;;; NOTE: Les fonctions suivantes (GET-VALUE, SET-VALUE, EXECUTE-INSTRUCTION, RUN-VM)
-;;; sont des fonctions d'INTERPRÉTEUR qui ne peuvent pas être compilées car elles
-;;; utilisent du dispatch dynamique sur les types. Elles sont commentées pour atteindre
-;;; 100% de compilation. Pour l'exécution interprétée, voir vm.lisp.
-
-#|
 (defun get-value (operand)
   "Récupère la valeur d'un opérande (registre ou valeur immédiate)"
   (cond
@@ -719,7 +677,6 @@
       (setq *vm-instruction-count* (+ *vm-instruction-count* 1))))
   
   t)
-|#
 
 ;;; ============================================================================
 ;;; EXPORT (Version compilable avec variables globales)

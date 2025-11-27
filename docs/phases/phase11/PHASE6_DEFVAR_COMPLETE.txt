@@ -1,0 +1,283 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                   PHASE 6 - DEFVAR/DEFCONSTANT IMPLÉMENTATION              ║
+║                              RAPPORT FINAL                                   ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Date: 2024
+Phase: 11 (Bootstrap VM1 dans VM0)
+Sous-phase: 6 (Compilation VM → MIPS)
+Durée: ~2h
+
+═══════════════════════════════════════════════════════════════════════════════
+1. OBJECTIF
+═══════════════════════════════════════════════════════════════════════════════
+
+Implémenter le support complet de DEFVAR et DEFCONSTANT dans le compilateur
+pour permettre la compilation de vm-compilable.lisp vers MIPS.
+
+Motivation (User): "éviter les variables globales pour éviter les interférences
+entre les vm"
+
+═══════════════════════════════════════════════════════════════════════════════
+2. IMPLÉMENTATION - DEFCONSTANT
+═══════════════════════════════════════════════════════════════════════════════
+
+STRATÉGIE: Inline substitution à la compilation
+  - Les constantes sont remplacées par leur valeur littérale
+  - Pas de code MIPS généré pour DEFCONSTANT
+  - Substitution transparente dans toutes les expressions
+
+MODIFICATIONS:
+  ✓ src/compiler.lisp ligne 42-60: Tables globales
+    - *global-constants* (hash-table symbol → value)
+    - reset-global-tables() pour réinitialisation
+  
+  ✓ src/compiler.lisp ligne 254-260: Résolution de symboles
+    - parse-lisp-expr vérifie *global-constants* en premier
+    - Si trouvé: retourne (:constant value)
+    - Sinon: retourne (:variable name)
+  
+  ✓ src/compiler.lisp ligne 380-384: Parser
+    - Case DEFCONSTANT ajouté
+    - Syntaxe: (defconstant +NOM+ valeur)
+    - Retourne: (:defconstant nom valeur)
+  
+  ✓ src/compiler.lisp ligne 2022-2033: Compilation
+    - compile-defconstant: Enregistre dans table, retourne '()
+    - Validation: valeur doit être un littéral numérique
+
+TESTS: tests/unit/test-defconstant.lisp (4/4 PASS ✓)
+  ✓ Test 1: Définir constante +STATE-READY+ = 0
+  ✓ Test 2: Utiliser dans expression (+ +STATE-READY+ 1)
+  ✓ Test 3: Définir multiples constantes
+  ✓ Test 4: Utiliser dans fonction
+
+EXEMPLE:
+  Input:  (defconstant +MAX-SIZE+ 1024)
+          (+ x +MAX-SIZE+)
+  Parse:  (:+ (:variable x) (:constant 1024))
+  Output: LW $v0 (x address)
+          ADDI $v0 1024 $v0
+
+═══════════════════════════════════════════════════════════════════════════════
+3. IMPLÉMENTATION - DEFVAR
+═══════════════════════════════════════════════════════════════════════════════
+
+STRATÉGIE: Allocation dans section de données globales
+  - Chaque variable occupe 1 mot (4 octets)
+  - Adressage: $zero + offset
+  - Initialisation: code généré si valeur fournie
+
+MODIFICATIONS:
+  ✓ src/compiler.lisp ligne 42-60: Tables globales
+    - *global-variables* (hash-table symbol → offset)
+    - *global-data-offset* (compteur d'allocation)
+  
+  ✓ src/compiler.lisp ligne 386-390: Parser
+    - Case DEFVAR ajouté
+    - Syntaxe: (defvar *nom* valeur)
+    - Parser la valeur (peut être expression)
+    - Retourne: (:defvar nom parsed-value)
+  
+  ✓ src/compiler.lisp ligne 2049-2073: Compilation
+    - compile-defvar:
+      * Alloue offset dans *global-data-offset*
+      * Enregistre dans *global-variables*
+      * Compile valeur initiale
+      * Génère: code-init + (SW $v0 $zero offset)
+  
+  ✓ src/compiler.lisp ligne 631-690: Lecture de variables
+    - compile-variable vérifie *global-variables* en PRIORITÉ
+    - Si trouvé: génère (LW $v0 $zero offset)
+    - Sinon: cherche dans environnement local
+  
+  ✓ src/compiler.lisp ligne 1612-1647: Écriture de variables
+    - compile-setq vérifie *global-variables* en PRIORITÉ
+    - Si trouvé: génère code-value + (SW $v0 $zero offset)
+    - Sinon: utilise logique locale
+
+TESTS: tests/unit/test-defvar.lisp (5/5 PASS ✓)
+  ✓ Test 1: Définir variable mystate = 0
+  ✓ Test 2: Référence à mystate (génère LW)
+  ✓ Test 3: Modifier avec (setq mystate 100) (génère SW)
+  ✓ Test 4: Plusieurs variables (offsets: 0, 4, 8)
+  ✓ Test 5: Fonction utilisant variable globale
+
+EXEMPLE:
+  Input:  (defvar *counter* 0)
+          (setq *counter* (+ *counter* 1))
+  
+  Allocation: *counter* → offset 0
+  
+  Init:   LI 0 $v0
+          SW $v0 $zero 0
+  
+  Usage:  LW $v0 $zero 0        ; Charger *counter*
+          ADDI $v0 1 $v0        ; Incrémenter
+          SW $v0 $zero 0        ; Stocker
+
+═══════════════════════════════════════════════════════════════════════════════
+4. COMPILATION VM - RÉSULTATS
+═══════════════════════════════════════════════════════════════════════════════
+
+Script: scripts/compile-vm-to-mips.lisp (AMÉLIORÉ)
+  - Extraction séparée: DEFCONSTANT, DEFVAR, DEFUN
+  - Compilation en 3 phases (ordre important!)
+  - Gestion d'erreurs individuelles
+  - Rapport détaillé
+
+Fichier source: src/vm-compilable.lisp
+  - 5 DEFCONSTANT
+  - 6 DEFVAR
+  - 26 DEFUN
+  - Total: 37 formes top-level
+
+RÉSULTATS DE COMPILATION:
+╔══════════════════════════════════╦═══════╦════════╦══════════╗
+║ Catégorie                        ║ Total ║ Succès ║ Taux     ║
+╠══════════════════════════════════╬═══════╬════════╬══════════╣
+║ DEFCONSTANT                      ║   5   ║   4    ║  80%     ║
+║ DEFVAR                           ║   6   ║   3    ║  50%     ║
+║ DEFUN                            ║  26   ║   5    ║  19%     ║
+╠══════════════════════════════════╬═══════╬════════╬══════════╣
+║ TOTAL                            ║  37   ║  12    ║  32%     ║
+╚══════════════════════════════════╩═══════╩════════╩══════════╝
+
+DEFCONSTANT - Succès (4):
+  ✓ +STATE-READY+ = 0
+  ✓ +STATE-RUNNING+ = 1
+  ✓ +STATE-HALTED+ = 2
+  ✓ +STATE-ERROR+ = 3
+
+DEFCONSTANT - Échecs (1):
+  ✗ +HEAP-LIMIT+ = (+ +HEAP-START+ *HEAP-SIZE*)
+    → Raison: Valeur calculée, pas un littéral
+    → Solution: DEFCONSTANT doit accepter expressions constantes
+
+DEFVAR - Succès (3):
+  ✓ *VM-MEMORY* (array allocation, 14 instructions)
+  ✓ *VM-REGISTERS* (array allocation, 14 instructions)
+  ✓ *VM-VERBOSE* (simple boolean, 6 instructions)
+
+DEFVAR - Échecs (3):
+  ✗ *VM-STATE* = +STATE-READY+
+    → Raison: Utilise constante comme valeur
+    → Erreur: "LENGTH : +STATE-READY+ n'est pas un SEQUENCE"
+  ✗ *VM-INSTRUCTION-COUNT* = 0
+    → Raison: Erreur similaire (bug dans parsing?)
+  ✗ *HEAP-POINTER* = +HEAP-START+
+    → Raison: Constante non définie (dépendance externe)
+
+DEFUN - Succès (5/26 = 19%):
+  ✓ INIT-MEMORY-LAYOUT (7 instr)
+  ✓ DUMP-REGISTERS (7 instr)
+  ✓ DUMP-MEMORY (11 instr)
+  ✓ DUMP-STACK (9 instr)
+  ✓ + 1 autre
+
+DEFUN - Échecs principaux:
+  - Variables non définies: *MAXMEM*, +HEAP-START+, $SP, $GP, PC, etc.
+    → Dépendances sur asm-ops.lisp
+  - Expressions non supportées: ERROR, FORMAT avec strings
+  - Syntaxe incompatible: LET bindings complexes
+
+═══════════════════════════════════════════════════════════════════════════════
+5. ANALYSE DES BLOCAGES
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLÈME 1: Dépendances externes
+  vm-compilable.lisp dépend de constantes dans asm-ops.lisp:
+  - *maxmem*, *heap-size*, +heap-start+, +registers-start+, etc.
+  - 15-20 constantes manquantes
+
+  SOLUTIONS:
+  a) Compiler asm-ops.lisp EN PREMIER
+  b) Copier les constantes nécessaires dans vm-compilable.lisp
+  c) Générer un fichier de bootstrap avec toutes les dépendances
+
+PROBLÈME 2: DEFCONSTANT avec expressions
+  Actuel: Accepte seulement littéraux numériques
+  Nécessaire: (defconstant +X+ (+ +A+ +B+))
+  
+  SOLUTION: Évaluer expressions constantes à la compilation
+  - Si tous les symboles sont des constantes → calculer
+  - Sinon → erreur
+
+PROBLÈME 3: FORMAT et ERROR
+  Non supportés par le compilateur, mais présents dans vm-compilable.lisp
+  
+  SOLUTIONS:
+  a) Supprimer complètement (déjà fait pour FORMAT)
+  b) Remplacer ERROR par code d'erreur dans registre
+
+PROBLÈME 4: Syntaxe complexe
+  LET, COND, loops complexes dans certaines fonctions
+  
+  SOLUTION: Simplifier davantage vm-compilable.lisp
+
+═══════════════════════════════════════════════════════════════════════════════
+6. CONCLUSION ET PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════════════════
+
+RÉALISATIONS ✓:
+  ✓ DEFCONSTANT: Implémenté et testé (4/4 tests)
+  ✓ DEFVAR: Implémenté et testé (5/5 tests)
+  ✓ Compilation partielle de VM: 32% (12/37 formes)
+  ✓ Infrastructure de compilation multi-phases
+  ✓ Gestion d'erreurs et rapports détaillés
+
+LIMITATIONS ACTUELLES:
+  ⚠ Dépendances externes non résolues
+  ⚠ DEFCONSTANT limité aux littéraux
+  ⚠ 68% des formes échouent
+
+CHEMIN CRITIQUE VERS COMPILATION COMPLÈTE:
+  1. Résoudre dépendances asm-ops.lisp (2-3h)
+  2. Améliorer DEFCONSTANT pour expressions (1h)
+  3. Simplifier fonctions problématiques (2-3h)
+  4. Support ERROR/FORMAT basique (1-2h)
+  Estimation totale: 6-9h
+
+ALTERNATIVES:
+  Option B (Recommandée maintenant): Programme de démo
+    - Créer petit programme autonome
+    - Compiler et exécuter dans VM₀
+    - Valider chaîne complète de compilation
+    - Temps: 1-2h
+
+  Option C: Documentation de l'existant
+    - Documenter architecture complète
+    - Tester chaque sous-système
+    - Préparer présentation
+    - Temps: 1-2h
+
+RECOMMANDATION:
+  Implémenter Option B (programme de démo) pour:
+  - Valider le travail accompli (DEFVAR/DEFCONSTANT)
+  - Prouver la faisabilité du bootstrap
+  - Avoir un résultat concret démontrable
+  - Minimiser le risque (temps restant limité)
+
+═══════════════════════════════════════════════════════════════════════════════
+7. MÉTRIQUES DE PROGRÈS PHASE 11
+═══════════════════════════════════════════════════════════════════════════════
+
+Temps écoulé: ~12h
+Temps estimé restant: 11-18h
+Progression globale: 52% (12h / 23h)
+
+Phase 1-5: ✅ 100% (9h)
+Phase 6: 🔄 75% (3h / 4h estimés)
+  ✅ DEFCONSTANT (1h)
+  ✅ DEFVAR (1h)
+  ✅ Script compilation (0.5h)
+  🔄 Résolution dépendances (0.5h fait, 2-3h restant)
+  
+Phase 7-8: ⏸️ 0% (12h restants)
+
+DÉCISION CRITIQUE:
+  Continuer vers compilation complète OU pivote Option B/C?
+
+═══════════════════════════════════════════════════════════════════════════════
+FIN DU RAPPORT
+═══════════════════════════════════════════════════════════════════════════════

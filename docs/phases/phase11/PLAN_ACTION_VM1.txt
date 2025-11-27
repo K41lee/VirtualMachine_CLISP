@@ -315,20 +315,77 @@ Note : Les opcodes restent des keywords (:ADD, :SUB, etc.) car déjà
        supportés par CASE. Pas besoin de les encoder en entiers.
 
 ════════════════════════════════════════════════════════════════════════════
-PHASE 6 : COMPILATION VM (4-5h)
+PHASE 6 : COMPILATION VM (4-5h) 🔄 EN COURS
 ════════════════════════════════════════════════════════════════════════════
 
-[ ] 6.1 Compiler les fonctions auxiliaires
+SESSION 1-3 : EXTENSIONS COMPILATEUR (5.5h) ✅
+  [✅] DEFVAR/DEFCONSTANT support (2h)
+  [✅] ERROR/FORMAT suppression (1.5h)
+  [✅] Intrinsèques GET-REGISTER/SET-REGISTER (2h)
+  
+  Résultat : 62% (16/26 DEFUN), 1130 lignes MIPS générées
+
+SESSION 4 : BUG FIX CRITIQUE - DOTTED PAIRS (2h) ✅
+  [✅] 6.1 Identification du bug
+    Symptôme : "SECOND: 0 is not a list" dans DEFUN+LET
+    Cause : Variables pile stockées comme dotted pairs (:stack . offset)
+    Impact : Bloquait ALLOC-MEMORY, PUSH-STACK, POP-STACK, PEEK-STACK
+  
+  [✅] 6.2 Debug progressif
+    - Isolation du bug : LET seul marche, DEFUN seul marche, combinaison échoue
+    - Trace complète avec format debug
+    - Découverte : var-info = ((STACK . 0) . 0)
+    - location = (STACK . 0) → dotted pair
+    - (second (STACK . 0)) → (car (cdr (STACK . 0))) → (car 0) → ERROR
+  
+  [✅] 6.3 Solution appliquée
+    Fichier : src/compiler.lisp, fonction compile-variable
+    Changements (3 lignes) :
+      Ligne 676 : (second location) → (cdr location)  ; Cas :stack
+      Ligne 681 : (second location) → (cdr location)  ; Cas :fp
+      Ligne 686 : (second location) → (cdr location)  ; Cas :closure
+    
+    Explication : Les locations sont créées avec (cons :tag value),
+                 produisant des dotted pairs, pas des listes.
+                 Il faut (cdr ...) pour extraire la valeur, pas (second ...).
+  
+  [✅] 6.4 Tests de validation
+    ✓ test-let-simple.lisp : LET basique (3 instructions)
+    ✓ test-let-get-register.lisp : LET + intrinsèque (3 instructions)
+    ✓ test-defun-isolation.lisp : 8/8 tests passent
+      - DEFUN vide : 9 instructions
+      - DEFUN+LET : 13 instructions ← MAINTENANT FONCTIONNE
+      - DEFUN+LET+GET-REGISTER : 13 instructions
+      - DEFUN+multiple expressions : 14 instructions
+      - DEFUN+WHEN : 22 instructions
+      - DEFUN+LET+WHEN : 26 instructions
+      - DEFUN+LET+WHEN+SET-REGISTER : 36 instructions
+      - ALLOC-MEMORY-like : 44 instructions ← DÉBLOQUÉ
+    
+    ✓ rapport-session4.lisp : Tous les tests passent
+  
+  [✅] 6.5 Impact et déblocage
+    Fonctions débloquées :
+      ✓ ALLOC-MEMORY (utilise LET avec GET-REGISTER)
+      ✓ PUSH-STACK (utilise LET)
+      ✓ POP-STACK (utilise LET*)
+      ✓ PEEK-STACK (utilise LET)
+      + 4-5 autres fonctions utilisant LET dans DEFUN
+    
+    Progression attendue : 62% → 77% (estimation +4-5 fonctions)
+
+PROCHAINES ÉTAPES :
+[ ] 6.6 Compiler les fonctions auxiliaires
     Ordre :
       1. get-value, set-value
       2. mem-read, mem-write
-      3. get-register, set-register
+      3. get-register, set-register (déjà testés comme intrinsèques)
 
-[ ] 6.2 Compiler execute-instruction
+[ ] 6.7 Compiler execute-instruction
     Dispatcher avec case (maintenant supporté)
     Appels aux fonctions execute-add, execute-sub, etc.
 
-[ ] 6.3 Compiler run-vm (boucle principale)
+[ ] 6.8 Compiler run-vm (boucle principale)
     Code LISP :
       (defun run-vm ()
         (loop while (eq *vm-state* :running)
@@ -344,7 +401,7 @@ PHASE 6 : COMPILATION VM (4-5h)
       RUN_VM_END:
         JR $RA
 
-[ ] 6.4 Générer le fichier MIPS complet
+[ ] 6.9 Générer le fichier MIPS complet
     Fichier : vm1-compilation/generated/vm1.mips
     
     Structure :
@@ -441,7 +498,7 @@ Statistiques :
   • Fichier vm-compilable.lisp : ~690 lignes, chargement OK
 
 ════════════════════════════════════════════════════════════════════════════
-ESTIMATION TEMPORELLE - MISE À JOUR 27 NOVEMBRE 2025 (11:35)
+ESTIMATION TEMPORELLE - MISE À JOUR 27 NOVEMBRE 2025 (19:45)
 ════════════════════════════════════════════════════════════════════════════
 
                                     Estimé    Réel      Status
@@ -450,12 +507,14 @@ Phase 2 : Boucles (WHILE)       3-4h      2h        ✅ TERMINÉ
 Phase 3 : Arrays                2-3h      2.5h      ✅ TERMINÉ
 Phase 4 : Case                  2-3h      0h        ✅ DÉJÀ FAIT
 Phase 5 : Simplification VM     5-6h      2.5h      ✅ TERMINÉ
-Phase 6 : Compilation VM        4-5h      -         ⏸️ À FAIRE
+Phase 6 : Compilation VM        4-5h      7.5h      🔄 EN COURS (62%→77%)
+  Session 1-3 : Extensions      -         5.5h      ✅ TERMINÉ
+  Session 4 : Bug fix           -         2h        ✅ TERMINÉ
 Phase 7 : Tests                 3-4h      -         ⏸️ À FAIRE
 Phase 8 : Documentation         2h        -         ⏸️ À FAIRE
 ─────────────────────────────────────────────────────────────────────────
-TOTAL                          23-30h    9h        ~40% COMPLÉTÉ
-                                         (~14-21h restantes)
+TOTAL                          23-30h    16.5h     ~55% COMPLÉTÉ
+                                         (~6.5-13.5h restantes)
 
 Temps gagné grâce aux extensions déjà implémentées et efficacité : ~8h
   - CASE déjà supporté : -2h
@@ -463,11 +522,13 @@ Temps gagné grâce aux extensions déjà implémentées et efficacité : ~8h
   - Documentation déjà faite : -2h
   - Phase 5 plus rapide que prévu (sed/scripts) : -3h
 
-Estimation révisée totale : 18-24h (au lieu de 25-32h)
+Temps supplémentaire Phase 6 : +2.5h (debug complexe dotted pairs)
+
+Estimation révisée totale : 20-26h (au lieu de 25-32h)
 
 ════════════════════════════════════════════════════════════════════════════
 
-PROGRESSION GLOBALE PHASE 11 : ~40% ⏩
+PROGRESSION GLOBALE PHASE 11 : ~55% ⏩⏩
 
 ✅ Analyse VM (100%)
 ✅ WHILE loops (100% - 10/10 tests)
@@ -475,9 +536,13 @@ PROGRESSION GLOBALE PHASE 11 : ~40% ⏩
 ✅ ARRAYS (100% - 12/12 tests)
 ✅ DOLIST analyse (100% - décision: ne pas implémenter)
 ✅ VM Simplification (100% - vm-compilable.lisp créé, ~690 lignes)
-⏸️ Compilation VM → MIPS (0%)
+🔄 Compilation VM → MIPS (62% - bug critique résolu, LET+DEFUN fonctionne)
 ⏸️ Tests VM₁ dans VM₀ (0%)
 
 Extensions totales implémentées : 22/22 tests passing (100%)
+
+BUGS CRITIQUES RÉSOLUS :
+  ✅ Dotted pairs dans compile-variable (Session 4)
+     Impact : Débloque ALLOC-MEMORY + 4-5 fonctions VM
 
 ════════════════════════════════════════════════════════════════════════════

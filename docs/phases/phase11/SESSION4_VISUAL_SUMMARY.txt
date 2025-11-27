@@ -1,0 +1,128 @@
+
+╔════════════════════════════════════════════════════════════════════════╗
+║                    SESSION 4 - RÉSUMÉ VISUEL                           ║
+║                  Bug Fix Critique : Dotted Pairs                       ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ PROBLÈME                                                               │
+└────────────────────────────────────────────────────────────────────────┘
+
+  ❌ (defun test (x) (let ((y 10)) y))  →  "SECOND: 0 is not a list"
+
+  Cause: Variables pile = dotted pairs (:stack . 0)
+         Code utilisait (second ...) au lieu de (cdr ...)
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ SOLUTION                                                               │
+└────────────────────────────────────────────────────────────────────────┘
+
+  Fichier: src/compiler.lisp
+  
+  Ligne 676:  (second location) → (cdr location)  ; :stack
+  Ligne 681:  (second location) → (cdr location)  ; :fp  
+  Ligne 686:  (second location) → (cdr location)  ; :closure
+
+  + BONUS: Support docstrings dans parser DEFUN (ligne 409)
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ TESTS DE VALIDATION                                                    │
+└────────────────────────────────────────────────────────────────────────┘
+
+  test-defun-isolation.lisp : 8/8 tests ✅
+  
+    ✓ DEFUN vide                    :  9 instructions
+    ✓ DEFUN+LET                     : 13 instructions  ← FONCTIONNE
+    ✓ DEFUN+LET+GET-REGISTER        : 13 instructions
+    ✓ DEFUN+multiple expressions    : 14 instructions
+    ✓ DEFUN+WHEN                    : 22 instructions
+    ✓ DEFUN+LET+WHEN                : 26 instructions
+    ✓ DEFUN+LET+WHEN+SET-REGISTER   : 36 instructions
+    ✓ ALLOC-MEMORY-like             : 44 instructions  ← DÉBLOQUÉ
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ RÉSULTATS src/vm-compilable.lisp                                       │
+└────────────────────────────────────────────────────────────────────────┘
+
+  AVANT:  0/26 DEFUN (0%)
+  APRÈS: 11/26 DEFUN (42%)  →  862 lignes MIPS
+
+  Fonctions compilées (11):
+    ✓ REG-INDEX (559 instr)
+    ✓ INIT-MEMORY-LAYOUT (7 instr)
+    ✓ GET-REGISTER (57 instr)         ← Débloqué
+    ✓ SET-REGISTER (62 instr)         ← Débloqué  
+    ✓ DUMP-REGISTERS (7 instr)
+    ✓ MEM-READ (29 instr)             ← Débloqué
+    ✓ MEM-WRITE (34 instr)            ← Débloqué
+    ✓ ALLOC-MEMORY (44 instr)         ← Débloqué !
+    ✓ DUMP-MEMORY (11 instr)
+    ✓ PEEK-STACK (43 instr)           ← Débloqué !
+    ✓ DUMP-STACK (9 instr)
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ BLOCKERS RESTANTS (15 fonctions)                                      │
+└────────────────────────────────────────────────────────────────────────┘
+
+  Catégorie 1: Variables globales (8 fonctions) - Effort: 30min
+    Manquants: +HEAP-START+, +HEAP-LIMIT+, *MAXMEM*, VERBOSE, etc.
+
+  Catégorie 2: LET* non supporté (1 fonction) - Effort: 1-2h
+    POP-STACK nécessite LET* (bindings séquentiels)
+
+  Catégorie 3: GET-REG non défini (2 fonctions) - Effort: 30min
+    INIT-REGISTERS, FETCH-INSTRUCTION
+
+  Catégorie 4: Problème OPERAND (2 fonctions) - Effort: 1h
+    GET-VALUE, SET-VALUE
+
+  Catégorie 5: Récursion complexe (2 fonctions) - Effort: 2-3h
+    EXECUTE-INSTRUCTION, RUN-VM
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ CHEMIN VERS 77%                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+  Objectif: 20/26 DEFUN (77%)
+  Actuel:   11/26 DEFUN (42%)
+  Manque:   +9 fonctions
+
+  Plan (2-3h):
+    1. Ajouter constantes manquantes     → +8 fonctions (30min)
+    2. Implémenter LET*                  → +1 fonction  (1-2h)
+    3. Fix GET-REG                       → (30min)
+    
+    Total: 11 + 9 = 20 fonctions → 77% ✅ ATTEIGNABLE
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ IMPACT                                                                 │
+└────────────────────────────────────────────────────────────────────────┘
+
+  ✅ Bug critique RÉSOLU
+  ✅ ALLOC-MEMORY compilable (mémoire dynamique)
+  ✅ PEEK-STACK compilable (inspection pile)
+  ✅ GET/SET-REGISTER compilables (accès registres)
+  ✅ MEM-READ/WRITE compilables (accès mémoire)
+  
+  → Primitives de base de la VM maintenant fonctionnelles
+
+┌────────────────────────────────────────────────────────────────────────┐
+│ PROCHAINE ÉTAPE                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+  Option A: Viser 77% (recommandé) - 2-3h
+    • Ajouter variables globales
+    • Implémenter LET*
+    • Fix GET-REG
+  
+  Option B: Continuer vers 100% - 5-7h
+    • + Fix OPERAND
+    • + Fix récursion complexe
+
+  Recommandation: Option A (77% suffit pour démonstration VM₁)
+
+╔════════════════════════════════════════════════════════════════════════╗
+║  SESSION 4: SUCCÈS ✅                                                  ║
+║  Bug résolu, docstrings supportées, 42% atteint                        ║
+║  Chemin vers 77% clairement défini                                     ║
+╚════════════════════════════════════════════════════════════════════════╝

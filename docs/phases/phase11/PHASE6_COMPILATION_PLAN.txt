@@ -1,0 +1,190 @@
+===============================================================================
+PHASE 6 - COMPILATION VM → MIPS (vm-compilable.lisp → vm-compiled.mips)
+===============================================================================
+Date: 27 novembre 2025
+Durée estimée: 4-5h
+
+OBJECTIF
+--------
+Compiler src/vm-compilable.lisp en code MIPS exécutable qui peut être chargé
+et exécuté dans la VM originale (VM₀).
+
+ARCHITECTURE RAPPEL
+-------------------
+VM₀ (Native)  : src/vm.lisp exécutée en LISP natif
+VM₁ (Compilée): vm-compilable.lisp compilée en MIPS, chargée dans VM₀
+
+Flux: Programme LISP → Compilateur → MIPS (code_prog)
+                                        ↓
+                                VM₁ (en MIPS) charge code_prog
+                                        ↓
+                                VM₀ (native) exécute VM₁
+
+STRATÉGIE DE COMPILATION
+-------------------------
+
+Option 1 : COMPILATION GLOBALE (RECOMMANDÉE)
+  Avantages:
+    + Simple à mettre en œuvre
+    + Gère automatiquement les dépendances
+    + Cohérent avec l'architecture du compilateur
+  
+  Approche:
+    1. Charger tout vm-compilable.lisp comme une expression
+    2. Le compilateur traite les DEFVAR, DEFCONSTANT, DEFUN
+    3. Génère un seul fichier MIPS cohérent
+    4. Sauvegarde dans output/vm-compiled.mips
+
+Option 2 : COMPILATION INCRÉMENTALE
+  Avantages:
+    + Contrôle fin sur chaque fonction
+    + Débogage plus facile
+  Inconvénients:
+    - Plus complexe à lier
+    - Nécessite gestion manuelle des symboles
+
+DÉCISION: Option 1 (Compilation globale)
+
+ÉTAPES DÉTAILLÉES
+-----------------
+
+ÉTAPE 1: Préparer l'environnement (30 min)
+  [ ] 1.1 Créer répertoire output/ si nécessaire
+  [ ] 1.2 Charger le compilateur avec extensions
+      - (load "src/compiler.lisp")
+      - Vérifier que WHILE et ARRAYS sont disponibles
+  [ ] 1.3 Vérifier que vm-compilable.lisp se charge
+      - (load "src/vm-compilable.lisp")
+      - Vérifier les exports
+
+ÉTAPE 2: Analyser vm-compilable.lisp (30 min)
+  [ ] 2.1 Lister toutes les fonctions définies
+      - Compter les DEFUN
+      - Identifier les dépendances
+  [ ] 2.2 Lister les variables globales
+      - DEFVAR: *vm-memory*, *vm-registers*, etc.
+      - DEFCONSTANT: +state-ready+, etc.
+  [ ] 2.3 Identifier les constructions utilisées
+      - WHILE: combien d'occurrences ?
+      - ARRAYS: make-array, aref
+      - CASE: branches
+      - Autres: COND, LET, PROGN
+
+ÉTAPE 3: Compiler vm-compilable.lisp (2-3h)
+  [ ] 3.1 Créer le script de compilation
+      Fichier: scripts/compile-vm.lisp
+      Contenu:
+        (load "src/compiler.lisp")
+        (load "src/vm-compilable.lisp")
+        (with-open-file (out "output/vm-compiled.mips"
+                             :direction :output
+                             :if-exists :supersede)
+          (let ((code (compile-file "src/vm-compilable.lisp")))
+            (format out "~{~A~%~}" code)))
+        (format t "✓ Compilation terminée: output/vm-compiled.mips~%")
+        (quit)
+  
+  [ ] 3.2 Exécuter la compilation
+      Command: clisp scripts/compile-vm.lisp
+  
+  [ ] 3.3 Gérer les erreurs potentielles
+      - Variables non définies
+      - Fonctions manquantes
+      - Syntaxe non supportée
+      - Dépassement de mémoire
+
+ÉTAPE 4: Vérifier le code MIPS généré (30 min)
+  [ ] 4.1 Vérifier la structure du fichier
+      - Header présent ?
+      - Instructions MIPS valides ?
+      - Labels correctement formés ?
+  
+  [ ] 4.2 Compter les instructions
+      - Nombre total d'instructions
+      - Taille en mémoire
+  
+  [ ] 4.3 Vérifier les sections
+      - Initialisation des variables globales
+      - Définitions de fonctions
+      - Point d'entrée (main ou première fonction)
+
+ÉTAPE 5: Tester le chargement dans VM₀ (1h)
+  [ ] 5.1 Créer un script de test simple
+      Fichier: tests/test-vm-compiled-load.lisp
+      Contenu:
+        (load "src/vm.lisp")
+        (load "src/loader.lisp")
+        (defvar *vm* (make-new-vm))
+        (load-program *vm* "output/vm-compiled.mips")
+        (format t "✓ VM₁ chargée dans VM₀~%")
+        (format t "Code size: ~A instructions~%" 
+                (- *maxmem* (get-register *vm* :$pc)))
+  
+  [ ] 5.2 Vérifier le chargement
+      - Pas d'erreurs de syntaxe MIPS ?
+      - Code chargé à la bonne adresse ?
+      - Registres initialisés ?
+  
+  [ ] 5.3 Test minimal: exécuter quelques instructions
+      - Juste fetch les premières instructions
+      - Vérifier qu'elles sont valides
+
+DÉFIS ANTICIPÉS
+----------------
+
+1. TAILLE DU CODE
+   Problème: vm-compilable.lisp fait ~690 lignes, le code MIPS sera énorme
+   Solution: Optimisations du compilateur, vérifier *maxmem*
+
+2. VARIABLES GLOBALES
+   Problème: Comment gérer *vm-memory*, *vm-registers* en MIPS ?
+   Solution: Allouer sur le tas au démarrage, stocker adresses dans registres
+
+3. APPELS DE FONCTION
+   Problème: Beaucoup de fonctions s'appellent mutuellement
+   Solution: Le compilateur gère déjà JAL/JR, vérifier les labels
+
+4. RÉCURSION
+   Problème: Certaines fonctions peuvent être récursives
+   Solution: Pile bien gérée par le compilateur
+
+5. ARRAYS DANS ARRAYS
+   Problème: *vm-registers* et *vm-memory* sont des arrays de 42 et *maxmem*
+   Solution: Utiliser make-array qui alloue sur le tas avec $gp
+
+CRITÈRES DE SUCCÈS
+------------------
+
+✓ output/vm-compiled.mips créé
+✓ Fichier contient du code MIPS valide
+✓ Toutes les fonctions de vm-compilable.lisp sont présentes
+✓ Code se charge dans VM₀ sans erreur
+✓ Taille < *maxmem* (vérifier limites mémoire)
+
+MÉTRIQUES À COLLECTER
+---------------------
+
+- Nombre de lignes Lisp: ~690
+- Nombre d'instructions MIPS générées: ?
+- Ratio Lisp:MIPS: ?
+- Temps de compilation: ?
+- Taille en mémoire: ?
+- Fonctions compilées: ?
+
+FICHIERS GÉNÉRÉS
+-----------------
+
+output/vm-compiled.mips          - Code MIPS de la VM compilée
+scripts/compile-vm.lisp          - Script de compilation
+tests/test-vm-compiled-load.lisp - Test de chargement
+docs/phases/phase11/COMPILATION_RESULTS.txt - Résultats détaillés
+
+PROCHAINE ÉTAPE (PHASE 7)
+--------------------------
+
+Une fois la compilation réussie, Phase 7 consistera à:
+- Exécuter VM₁ dans VM₀
+- Charger un programme simple dans VM₁
+- Valider le bootstrap complet
+
+===============================================================================

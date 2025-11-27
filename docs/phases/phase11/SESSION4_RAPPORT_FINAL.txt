@@ -1,0 +1,272 @@
+═══════════════════════════════════════════════════════════════════════════
+RAPPORT SESSION 4 - PHASE 11 VM₁
+Bug Fix Critique : Dotted Pairs + Support Docstrings
+═══════════════════════════════════════════════════════════════════════════
+
+Date: 27 novembre 2025
+Durée: 2 heures
+Objectif initial: Débloquer DEFUN+LET, atteindre 77%
+
+═══════════════════════════════════════════════════════════════════════════
+PROBLÈME IDENTIFIÉ
+═══════════════════════════════════════════════════════════════════════════
+
+Symptôme:
+  ✗ (defun test (x) (let ((y 10)) y))
+  → "SECOND: 0 is not a list"
+
+Manifestation:
+  - LET seul fonctionne
+  - DEFUN seul fonctionne
+  - DEFUN+LET échoue systématiquement
+  - Bloque: ALLOC-MEMORY, PUSH-STACK, POP-STACK, PEEK-STACK
+
+═══════════════════════════════════════════════════════════════════════════
+INVESTIGATION
+═══════════════════════════════════════════════════════════════════════════
+
+Étapes de debug:
+  1. Tests d'isolation progressifs (test-defun-isolation.lisp)
+  2. Debug avec format pour tracer les valeurs
+  3. Découverte: var-info = ((STACK . 0) . 0)
+               location = (STACK . 0)  ← DOTTED PAIR
+  4. Erreur: (second (STACK . 0)) → (car (cdr ...)) → (car 0) → ERREUR
+
+Cause racine:
+  Variables sur pile créées avec (cons :stack offset) → dotted pair
+  Code utilisait (second location) au lieu de (cdr location)
+  
+  (second '(:stack . 0))
+    = (car (cdr '(:stack . 0)))
+    = (car 0)
+    → "SECOND: 0 is not a list"
+
+═══════════════════════════════════════════════════════════════════════════
+SOLUTION
+═══════════════════════════════════════════════════════════════════════════
+
+Fichier: src/compiler.lisp
+Fonction: compile-variable
+
+Changements (3 lignes):
+  Ligne 676: (second location) → (cdr location)  ; Cas :stack
+  Ligne 681: (second location) → (cdr location)  ; Cas :fp
+  Ligne 686: (second location) → (cdr location)  ; Cas :closure
+
+Justification:
+  Les locations sont des dotted pairs: (cons tag value)
+  Pour extraire value d'un dotted pair: utiliser (cdr ...)
+  (second ...) ne fonctionne que sur les listes propres
+
+═══════════════════════════════════════════════════════════════════════════
+VALIDATION
+═══════════════════════════════════════════════════════════════════════════
+
+Tests créés:
+  ✓ test-let-simple.lisp         : LET basique (3 instr)
+  ✓ test-let-get-register.lisp   : LET + intrinsèque (3 instr)
+  ✓ test-defun-isolation.lisp    : 8/8 tests passent
+  ✓ rapport-session4.lisp        : 5/5 tests passent
+
+Résultats test-defun-isolation.lisp:
+  Test 1: DEFUN vide                          → ✓ 9 instructions
+  Test 2: DEFUN+LET                           → ✓ 13 instructions  ← FIX
+  Test 3: DEFUN+LET+GET-REGISTER              → ✓ 13 instructions
+  Test 4: DEFUN+multiple expressions          → ✓ 14 instructions
+  Test 5: DEFUN+WHEN                          → ✓ 22 instructions
+  Test 6: DEFUN+LET+WHEN                      → ✓ 26 instructions
+  Test 7: DEFUN+LET+WHEN+SET-REGISTER         → ✓ 36 instructions
+  Test 8: ALLOC-MEMORY-like                   → ✓ 44 instructions  ← DÉBLOQUÉ
+
+═══════════════════════════════════════════════════════════════════════════
+AMÉLIORATION BONUS : SUPPORT DOCSTRINGS
+═══════════════════════════════════════════════════════════════════════════
+
+Problème découvert:
+  Le parser DEFUN ne gérait pas les docstrings
+  (defun foo (x) "doc" body) → échouait
+
+Solution:
+  Fichier: src/compiler.lisp, ligne 409
+  Parser DEFUN modifié pour détecter et ignorer les docstrings
+
+  Code ajouté:
+    (let ((name (first args))
+          (params (second args))
+          (rest-body (cddr args)))
+      (let ((body (if (and (stringp (first rest-body))
+                          (cdr rest-body))
+                     (cdr rest-body)    ; Sauter docstring
+                     rest-body)))       ; Pas de docstring
+        (list :defun name params body)))
+
+Impact:
+  Permet de compiler src/vm-compilable.lisp qui utilise des docstrings
+  partout (26 DEFUN avec docstrings)
+
+═══════════════════════════════════════════════════════════════════════════
+RÉSULTATS COMPILATION src/vm-compilable.lisp
+═══════════════════════════════════════════════════════════════════════════
+
+Test: test-source-compilation.lisp
+
+AVANT SESSION 4:
+  Taux: 0/26 DEFUN (0%)
+  Erreur: "SECOND: 0 is not a list" + docstrings non supportées
+
+APRÈS FIX DOTTED PAIRS + DOCSTRINGS:
+  Taux: 11/26 DEFUN (42%)
+  Instructions MIPS: 862 lignes
+
+Fonctions compilées avec succès (11):
+  ✓ REG-INDEX (559 instructions)
+  ✓ INIT-MEMORY-LAYOUT (7 instructions)
+  ✓ GET-REGISTER (57 instructions)        ← Débloqué
+  ✓ SET-REGISTER (62 instructions)        ← Débloqué
+  ✓ DUMP-REGISTERS (7 instructions)
+  ✓ MEM-READ (29 instructions)            ← Débloqué
+  ✓ MEM-WRITE (34 instructions)           ← Débloqué
+  ✓ ALLOC-MEMORY (44 instructions)        ← Débloqué !
+  ✓ DUMP-MEMORY (11 instructions)
+  ✓ PEEK-STACK (43 instructions)          ← Débloqué !
+  ✓ DUMP-STACK (9 instructions)
+
+Fonctions échouées (15):
+  ✗ RESET-HEAP         : Variable +HEAP-START+ non définie
+  ✗ VM-MALLOC          : Variable +HEAP-LIMIT+ non définie
+  ✗ MAKE-NEW-VM        : Variable VERBOSE non définie
+  ✗ INIT-REGISTERS     : Fonction GET-REG non définie
+  ✗ RESET-VM           : Variable *MAXMEM* non définie
+  ✗ MAP-OLD-REGISTER   : Variable *REGISTER-NAMES* non définie
+  ✗ CHECK-MEMORY-BOUNDS: Variable *MAXMEM* non définie
+  ✗ CALCULATE-CODE-START: Variable *MAXMEM* non définie
+  ✗ PUSH-STACK         : Variable +HEAP-START+ non définie
+  ✗ POP-STACK          : LET* non supporté               ← Extension manquante
+  ✗ FETCH-INSTRUCTION  : Fonction GET-REG non définie
+  ✗ GET-VALUE          : Problème OPERAND dans GET-REGISTER
+  ✗ SET-VALUE          : Problème OPERAND dans SET-REGISTER
+  ✗ EXECUTE-INSTRUCTION: Fonction EXECUTE-INSTRUCTION non définie (récursion)
+  ✗ RUN-VM             : Variable +STATE-RUNNING+ non définie
+
+═══════════════════════════════════════════════════════════════════════════
+ANALYSE DES BLOCKERS RESTANTS
+═══════════════════════════════════════════════════════════════════════════
+
+Catégorie 1: Variables globales manquantes (8 fonctions)
+  Variables: +HEAP-START+, +HEAP-LIMIT+, *MAXMEM*, VERBOSE, *REGISTER-NAMES*
+  Cause: Certaines constantes de vm.lisp pas converties dans vm-compilable.lisp
+  Solution: Ajouter les DEFCONSTANT manquantes
+  Effort: 30min
+
+Catégorie 2: LET* non supporté (1 fonction)
+  Fonction: POP-STACK
+  Extension nécessaire: LET* (like LET mais bindings séquentiels)
+  Solution: Implémenter compile-let* (similaire à compile-let)
+  Effort: 1-2h
+  Impact: +1 fonction (+4%)
+
+Catégorie 3: Fonction GET-REG non définie (2 fonctions)
+  Fonctions: INIT-REGISTERS, FETCH-INSTRUCTION
+  Cause: GET-REG existe dans asm-ops.lisp mais pas accessible
+  Solution: Soit intrinsèque, soit inliner le code
+  Effort: 30min
+
+Catégorie 4: Problèmes OPERAND (2 fonctions)
+  Fonctions: GET-VALUE, SET-VALUE
+  Cause: OPERAND comme nom de paramètre entre en conflit
+  Solution: Analyser et corriger le code source
+  Effort: 1h
+
+Catégorie 5: Récursion complexe (2 fonctions)
+  Fonctions: EXECUTE-INSTRUCTION, RUN-VM
+  Cause: Fonctions interdépendantes, EXECUTE-INSTRUCTION récursif via CASE
+  Solution: Analyser structure, peut nécessiter compilation complète du fichier
+  Effort: 2-3h
+
+═══════════════════════════════════════════════════════════════════════════
+PROGRESSION GLOBALE
+═══════════════════════════════════════════════════════════════════════════
+
+Session 3:  62% (16/26 DEFUN estimés, 1130 lignes MIPS)
+Session 4:  42% (11/26 DEFUN réels,    862 lignes MIPS)
+
+Note: La session 3 mesurait des fonctions différentes (tests synthétiques)
+      La session 4 mesure src/vm-compilable.lisp (code réel)
+
+Objectif 77%: Nécessite 20/26 DEFUN = +9 fonctions
+  Catégorie 1: +8 fonctions (variables globales)
+  Catégorie 2: +1 fonction (LET*)
+  → 11 + 9 = 20 fonctions → 77% ✅ ATTEIGNABLE
+
+Estimation effort vers 77%:
+  - Variables globales: 30min
+  - LET*: 1-2h
+  - GET-REG fix: 30min
+  Total: 2-3h
+
+═══════════════════════════════════════════════════════════════════════════
+IMPACT ET DÉBLOCAGES
+═══════════════════════════════════════════════════════════════════════════
+
+Débloqué par fix dotted pairs:
+  ✅ ALLOC-MEMORY (mémoire dynamique)
+  ✅ PEEK-STACK (inspection pile)
+  ✅ GET/SET-REGISTER (accès registres)
+  ✅ MEM-READ/WRITE (accès mémoire)
+
+Ces 4-5 fonctions sont **critiques** pour le fonctionnement de la VM.
+Le fix permet maintenant la compilation des primitives de base.
+
+═══════════════════════════════════════════════════════════════════════════
+LEÇONS APPRISES
+═══════════════════════════════════════════════════════════════════════════
+
+1. Dotted pairs vs listes
+   - (cons a b) crée un dotted pair si b n'est pas une liste
+   - (second ...) ne fonctionne que sur listes propres
+   - Utiliser (cdr ...) pour extraire de dotted pairs
+
+2. Debug méthodique
+   - Isolation progressive du problème
+   - Format debug pour tracer valeurs exactes
+   - Ne pas faire d'assumptions sur les types
+
+3. Parser robuste
+   - Les docstrings sont optionnelles
+   - Vérifier (stringp (first body)) avant d'assumer que c'est du code
+
+═══════════════════════════════════════════════════════════════════════════
+PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════════════
+
+Option A: Viser 77% (recommandé)
+  1. Ajouter constantes manquantes (30min)
+  2. Implémenter LET* (1-2h)
+  3. Fix GET-REG (30min)
+  → Atteint 77% (20/26 DEFUN)
+
+Option B: Continuer vers 100%
+  4. Fix OPERAND (1h)
+  5. Fix EXECUTE-INSTRUCTION/RUN-VM (2-3h)
+  → Atteint ~85-90% (22-24/26 DEFUN)
+
+Recommandation: Option A (77% suffit pour démonstration)
+
+═══════════════════════════════════════════════════════════════════════════
+FIN DU RAPPORT
+═══════════════════════════════════════════════════════════════════════════
+
+Session: SUCCÈS ✅
+Bug critique: RÉSOLU ✅
+Documentation: COMPLÈTE ✅
+
+Fichiers modifiés:
+  - src/compiler.lisp (lignes 409, 676, 681, 686)
+
+Tests créés:
+  - test-defun-isolation.lisp (8 tests)
+  - test-source-compilation.lisp (test exhaustif)
+  - rapport-session4.lisp (tests validation)
+
+Taux actuel: 42% (11/26 DEFUN de vm-compilable.lisp)
+Objectif 77%: ATTEIGNABLE en 2-3h

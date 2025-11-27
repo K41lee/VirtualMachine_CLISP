@@ -7,36 +7,55 @@
 ;;; DÉFINITION SÉCURISÉE DES REGISTRES (évite problème $ dans CLISP)
 ;;; ============================================================================
 
-;; Créer les symboles de registres depuis la liste *register-names*
-(defparameter *reg-v0* (get-reg :v0))
-(defparameter *reg-t0* (get-reg :t0))
-(defparameter *reg-t1* (get-reg :t1))
-(defparameter *reg-t2* (get-reg :t2))
-(defparameter *reg-t3* (get-reg :t3))
-(defparameter *reg-t4* (get-reg :t4))  ; PHASE 11 - arrays
-(defparameter *reg-t5* (get-reg :t5))  ; PHASE 11 - arrays
-(defparameter *reg-t6* (get-reg :t6))  ; PHASE 11 - arrays
-(defparameter *reg-t7* (get-reg :t7))  ; PHASE 11 - arrays
-(defparameter *reg-t8* (get-reg :t8))
-(defparameter *reg-t9* (get-reg :t9))
-(defparameter *reg-a0* (get-reg :a0))
-(defparameter *reg-a1* (get-reg :a1))
-(defparameter *reg-a2* (get-reg :a2))
-(defparameter *reg-a3* (get-reg :a3))
-(defparameter *reg-s0* (get-reg :s0))
-(defparameter *reg-s1* (get-reg :s1))
-(defparameter *reg-s2* (get-reg :s2))
-(defparameter *reg-s3* (get-reg :s3))
-(defparameter *reg-s4* (get-reg :s4))
-(defparameter *reg-s5* (get-reg :s5))
-(defparameter *reg-s6* (get-reg :s6))
-(defparameter *reg-s7* (get-reg :s7))
-(defparameter *reg-s1* (get-reg :s1))
-(defparameter *reg-s2* (get-reg :s2))
-(defparameter *reg-s3* (get-reg :s3))
-(defparameter *reg-sp* (get-reg :sp))
-(defparameter *reg-ra* (get-reg :ra))
-(defparameter *reg-zero* (get-reg :zero))
+;; PHASE 11: Définition directe des registres sans dépendance à get-reg
+;; Les keywords sont automatiquement convertis en majuscules par Common Lisp
+(defparameter *reg-v0* :$V0)
+(defparameter *reg-t0* :$T0)
+(defparameter *reg-t1* :$T1)
+(defparameter *reg-t2* :$T2)
+(defparameter *reg-t3* :$T3)
+(defparameter *reg-t4* :$T4)  ; PHASE 11 - arrays
+(defparameter *reg-t5* :$T5)  ; PHASE 11 - arrays
+(defparameter *reg-t6* :$T6)  ; PHASE 11 - arrays
+(defparameter *reg-t7* :$T7)  ; PHASE 11 - arrays
+(defparameter *reg-t8* :$T8)
+(defparameter *reg-t9* :$T9)
+(defparameter *reg-a0* :$A0)
+(defparameter *reg-a1* :$A1)
+(defparameter *reg-a2* :$A2)
+(defparameter *reg-a3* :$A3)
+(defparameter *reg-s0* :$S0)
+(defparameter *reg-s1* :$S1)
+(defparameter *reg-s2* :$S2)
+(defparameter *reg-s3* :$S3)
+(defparameter *reg-s4* :$S4)
+(defparameter *reg-s5* :$S5)
+(defparameter *reg-s6* :$S6)
+(defparameter *reg-s7* :$S7)
+(defparameter *reg-sp* :$SP)
+(defparameter *reg-ra* :$RA)
+(defparameter *reg-zero* :$ZERO)
+
+;;; ============================================================================
+;;; TABLES GLOBALES (PHASE 11 - DEFVAR/DEFCONSTANT)
+;;; ============================================================================
+
+(defparameter *global-constants* (make-hash-table :test 'eq)
+  "Table des constantes globales définies par DEFCONSTANT.
+   Mapping: symbole → valeur")
+
+(defparameter *global-variables* (make-hash-table :test 'eq)
+  "Table des variables globales définies par DEFVAR.
+   Mapping: symbole → adresse mémoire (ou offset dans section données)")
+
+(defparameter *global-data-offset* 0
+  "Offset courant dans la section de données globales")
+
+(defun reset-global-tables ()
+  "Réinitialise les tables globales (pour tests)"
+  (clrhash *global-constants*)
+  (clrhash *global-variables*)
+  (setf *global-data-offset* 0))
 
 ;;; ============================================================================
 ;;; ENVIRONNEMENT DE COMPILATION
@@ -230,8 +249,16 @@ qui a défini la fonction, ou NIL si non trouvée."
     ((eq expr t)
      (list :constant 1))  ; t = 1 (DOIT être avant symbolp car T est un symbole)
     
+    ((keywordp expr)
+     ;; PHASE 11: Les keywords (:$sp, :$gp, etc.) sont des constantes
+     (list :constant expr))
+    
     ((symbolp expr)
-     (list :variable expr))
+     ;; PHASE 11: Vérifier d'abord si c'est une constante globale
+     (let ((const-value (gethash expr *global-constants*)))
+       (if const-value
+           (list :constant const-value)
+           (list :variable expr))))
     
     ((lisp-list-p expr)
      (let ((op (first expr))
@@ -352,9 +379,43 @@ qui a défini la fonction, ou NIL si non trouvée."
               (cons :lambda args)  ; args contient déjà (params body...)
               (error "Syntaxe LAMBDA incorrecte: ~A" expr)))
          
+         ;; PHASE 11 - Définition de constante globale
+         (defconstant
+          ;; Syntaxe: (defconstant +NOM+ valeur [docstring])
+          ;; La valeur peut être un littéral ou expression - laissée brute pour eval
+          (list :defconstant (first args) (second args)))
+         
+         ;; PHASE 11 - Définition de variable globale
+         ((defvar defparameter)
+          ;; Syntaxe: (defvar *nom* valeur [docstring])
+          ;; DEFPARAMETER est traité comme DEFVAR pour la compilation
+          ;; La valeur est laissée brute - elle sera parsée dans compile-defvar
+          ;; IMPORTANT: Ne pas parser ici car les constantes ne sont pas encore définies!
+          (list :defvar (first args) (second args)))
+         
+         ;; PHASE 11 - ERROR: Signal une erreur (compilé en HALT)
+         (error
+          ;; Syntaxe: (error "message") ou (error "format" arg1 arg2...)
+          ;; Pour compilation: on ignore le message et génère un HALT
+          (list :error))
+         
+         ;; PHASE 11 - FORMAT: Affichage (ignoré en compilation)
+         (format
+          ;; Syntaxe: (format t "..." args...)
+          ;; Pour compilation: on ignore complètement (pas d'output)
+          (list :format))
+         
          ;; Définition de fonction
          (defun
-          (list :defun (first args) (second args) (cddr args)))
+          (let ((name (first args))
+                (params (second args))
+                (rest-body (cddr args)))
+            ;; Ignorer la docstring si présente
+            (let ((body (if (and (stringp (first rest-body))
+                                (cdr rest-body))  ; Il reste du code après
+                           (cdr rest-body)  ; Sauter la docstring
+                           rest-body)))  ; Pas de docstring
+              (list :defun name params body))))
          
          ;; Appel de fonction
          (t
@@ -594,32 +655,38 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; ============================================================================
 
 (defun compile-variable (var env)
-  "Compile une référence à une variable (registre, pile, ou via static links)"
-  ;; Essayer recherche avec profondeur (Phase 9 closures)
-  (let ((var-info (lookup-variable-with-depth env var)))
-    (if var-info
-        ;; Variable trouvée (possiblement dans scope englobant)
-        (let ((location (car var-info))
-              (var-depth (cdr var-info))
-              (current-depth (compiler-env-lexical-depth env)))
-          (cond
-            ;; Cas 1 : Variable dans un registre (même scope)
-            ((and (symbolp location) (= var-depth current-depth))
-             (list (list :MOVE location *reg-v0*)))
-            
-            ;; Cas 2 : Variable sur la pile (offset depuis SP, même scope)
-            ((and (consp location) (eq (car location) :stack) (= var-depth current-depth))
-             (let ((offset (second location)))
-               (list (list :LW *reg-v0* *reg-sp* offset))))  ; Format: (LW dest base offset)
+  "Compile une référence à une variable (registre, pile, ou via static links).
+   Vérifie d'abord les variables globales DEFVAR, puis les variables locales."
+  ;; PRIORITÉ 1 : Vérifier si c'est une variable globale (DEFVAR)
+  (let ((global-addr (gethash var *global-variables*)))
+    (if global-addr
+        ;; Variable globale trouvée : charger depuis $zero + offset
+        (list (list :LW *reg-v0* *reg-zero* global-addr))
+        ;; Sinon, chercher dans l'environnement local
+        (let ((var-info (lookup-variable-with-depth env var)))
+          (if var-info
+              ;; Variable trouvée (possiblement dans scope englobant)
+              (let ((location (car var-info))
+                    (var-depth (cdr var-info))
+                    (current-depth (compiler-env-lexical-depth env)))
+                (cond
+                  ;; Cas 1 : Variable dans un registre (même scope)
+                  ((and (symbolp location) (= var-depth current-depth))
+                   (list (list :MOVE location *reg-v0*)))
+                  
+                  ;; Cas 2 : Variable sur la pile (offset depuis SP, même scope)
+                  ((and (consp location) (eq (car location) :stack) (= var-depth current-depth))
+                   (let ((offset (cdr location)))  ; FIXÉ: utiliser cdr pour dotted pair
+                     (list (list :LW *reg-v0* *reg-sp* offset))))  ; Format: (LW dest base offset)
             
             ;; Cas 3 : Variable paramètre fonction (offset depuis FP, même scope)
             ((and (consp location) (eq (car location) :fp) (= var-depth current-depth))
-             (let ((offset (second location)))
+             (let ((offset (cdr location)))  ; FIXÉ: utiliser cdr pour dotted pair
                (list (list :LW *reg-v0* (get-reg :fp) offset))))
             
             ;; Cas 4 : Variable accessible via closure (PHASE 9)
             ((and (consp location) (eq (car location) :closure))
-             (let ((closure-index (second location)))
+             (let ((closure-index (cdr location)))  ; FIXÉ: utiliser cdr pour dotted pair
                ;; La fermeture est dans $s1 (passée par l'appelant)
                ;; Structure: [Label][Size][Var0][Var1]...
                ;; Var_i est à l'offset (2 + i) depuis le début de la fermeture
@@ -643,12 +710,12 @@ qui a défini la fonction, ou NIL si non trouvée."
              ;; Simplement copier le registre (risqué mais peut fonctionner dans des cas simples)
              (list (list :MOVE location *reg-v0*)))
             
-            (t
-             (error "Variable dans configuration non supportée: ~A (location: ~A, depth: ~A/~A)" 
-                    var location var-depth current-depth))))
-        
-        ;; Cas 5 : Variable non trouvée du tout
-        (error "Variable non définie: ~A" var))))
+                  (t
+                   (error "Variable dans configuration non supportée: ~A (location: ~A, depth: ~A/~A)" 
+                          var location var-depth current-depth))))
+              
+              ;; Variable locale non trouvée du tout
+              (error "Variable non définie: ~A" var))))))
 
 ;;; ============================================================================
 ;;; COMPILATION - ARITHMÉTIQUE
@@ -1570,31 +1637,38 @@ qui a défini la fonction, ou NIL si non trouvée."
 
 (defun compile-setq (var value env)
   "Compile (setq var value)
-   Modifie la valeur d'une variable existante"
-  (let ((location (lookup-variable env var))
-        (code '()))
-    
-    ;; Compiler la nouvelle valeur
-    (setf code (append code (compile-expr value env)))
-    
-    ;; Stocker dans la variable
-    (cond
-      ;; Cas 1 : Variable dans un registre
-      ((and location (symbolp location))
-       (setf code (append code
-                         (list (list :MOVE *reg-v0* location)))))
-      
-      ;; Cas 2 : Variable sur la pile
-      ((and location (consp location) (eq (car location) :stack))
-       (let ((offset (cdr location)))
-         (setf code (append code
-                           (list (list :SW *reg-v0* *reg-sp* offset))))))
-      
-      ;; Cas 3 : Variable non trouvée
-      (t
-       (error "Variable non définie dans SETQ: ~A" var)))
-    
-    code))
+   Modifie la valeur d'une variable existante (locale ou globale DEFVAR)"
+  ;; PRIORITÉ 1 : Vérifier si c'est une variable globale (DEFVAR)
+  (let ((global-addr (gethash var *global-variables*)))
+    (if global-addr
+        ;; Variable globale : compiler valeur et stocker à $zero + offset
+        (let ((code (compile-expr value env)))
+          (append code (list (list :SW *reg-v0* *reg-zero* global-addr))))
+        ;; Sinon, variable locale
+        (let ((location (lookup-variable env var))
+              (code '()))
+          
+          ;; Compiler la nouvelle valeur
+          (setf code (append code (compile-expr value env)))
+          
+          ;; Stocker dans la variable locale
+          (cond
+            ;; Cas 1 : Variable dans un registre
+            ((and location (symbolp location))
+             (setf code (append code
+                               (list (list :MOVE *reg-v0* location)))))
+            
+            ;; Cas 2 : Variable sur la pile
+            ((and location (consp location) (eq (car location) :stack))
+             (let ((offset (cdr location)))
+               (setf code (append code
+                                 (list (list :SW *reg-v0* *reg-sp* offset))))))
+            
+            ;; Cas 3 : Variable non trouvée
+            (t
+             (error "Variable non définie dans SETQ: ~A" var)))
+          
+          code))))
 
 (defun compile-labels (definitions body env)
   "Compile (labels ((fn1 args1 body1) (fn2 args2 body2) ...) body)
@@ -1968,17 +2042,378 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:call
        (compile-call (second parsed) (third parsed) env))
       
+      (:defconstant
+       (compile-defconstant (second parsed) (third parsed) env))
+      
+      (:defvar
+       (compile-defvar (second parsed) (third parsed) env))
+      
       (:defun
        (compile-defun (second parsed) (third parsed) (fourth parsed) env))
       
+      (:error
+       ;; ERROR compilé en HALT (arrêt immédiat)
+       (list (list :HALT)))
+      
+      (:format
+       ;; FORMAT ignoré en compilation (pas d'output)
+       '())
+      
       (t (error "Type d'expression non supporté: ~A" (first parsed))))))
+
+;;; ============================================================================
+;;; COMPILATION - DEFCONSTANT / DEFVAR (PHASE 11)
+;;; ============================================================================
+
+(defun eval-constant-expr (expr)
+  "Évalue une expression constante récursivement.
+   Retourne la valeur numérique si toutes les dépendances sont des constantes.
+   Supporte: nombres, symboles constants (DEFCONSTANT ou DEFPARAMETER), (+ - * / MOD) sur constantes."
+  (cond
+    ;; Cas 1: Nombre littéral
+    ((numberp expr) expr)
+    
+    ;; Cas 2: Symbole -> chercher dans *global-constants* OU *global-variables*
+    ((symbolp expr)
+     (let ((const-val (gethash expr *global-constants*))
+           (var-offset (gethash expr *global-variables*)))
+       (cond
+         ;; Priorité 1: Constante DEFCONSTANT
+         (const-val const-val)
+         ;; Priorité 2: Variable DEFPARAMETER (on retourne l'offset pour usage ultérieur)
+         ;; NOTE: Pour vraies constantes calculées, DEFPARAMETER devrait être compilé
+         ;; avant DEFCONSTANT qui l'utilise. Pour l'instant on accepte l'offset.
+         (var-offset var-offset)
+         ;; Pas trouvé
+         (t (error "DEFCONSTANT: symbole non défini: ~A" expr)))))
+    
+    ;; Cas 3: Expression arithmétique
+    ((and (listp expr) (member (first expr) '(+ - * / mod)))
+     (let ((op (first expr))
+           (args (rest expr)))
+       ;; Évaluer récursivement tous les arguments
+       (let ((vals (mapcar #'eval-constant-expr args)))
+         (case op
+           (+ (apply #'+ vals))
+           (- (apply #'- vals))
+           (* (apply #'* vals))
+           (/ (apply #'truncate vals))  ; Division entière
+           (mod (apply #'mod vals))))))
+    
+    ;; Cas 4: Autre expression non supportée
+    (t (error "DEFCONSTANT: expression non supportée: ~A" expr))))
+
+(defun compile-defconstant (name value env)
+  "Compile (defconstant +NOM+ valeur).
+   Enregistre la constante dans *global-constants* et ne génère PAS de code MIPS.
+   Les références à la constante seront remplacées par sa valeur à la compilation.
+   
+   AMÉLIORATION PHASE 11: Accepte maintenant les expressions constantes:
+   - Nombres littéraux: (defconstant +X+ 42)
+   - Expressions calculées: (defconstant +Y+ (+ +X+ 10))
+   - Opérateurs supportés: + - * / MOD"
+  (declare (ignore env))
+  ;; Évaluer l'expression constante (peut être littéral ou calculée)
+  (let ((computed-value (eval-constant-expr value)))
+    ;; Enregistrer dans la table globale
+    (setf (gethash name *global-constants*) computed-value)
+    ;; Ne générer aucun code MIPS (les constantes sont substituées inline)
+    '()))
+
+(defun compile-defvar (name value env)
+  "Compile (defvar *nom* valeur).
+   Alloue un slot dans la section de données globales et génère le code
+   d'initialisation.
+   
+   STRATÉGIE:
+   - Allouer offset dans *global-data-offset* (incrémenté de 4 octets/mot)
+   - Enregistrer (nom → offset) dans *global-variables*
+   - Si valeur fournie: PARSER puis compiler la valeur et générer SW pour stocker
+   - Les variables globales sont adressées depuis $zero + offset
+   
+   Exemple: (defvar *state* 0)
+     → Alloue offset 0, génère: LI $v0 0 ; SW $v0 $zero 0
+   
+   NOTE PHASE 11: La valeur arrive NON PARSÉE (brute) car le parsing de DEFVAR
+   dans parse-lisp-expr ne parse pas la valeur (pour permettre aux constantes
+   d'être définies avant)."
+  (let ((addr *global-data-offset*)
+        (code '()))
+    ;; Enregistrer l'adresse de la variable AVANT de compiler la valeur
+    ;; Important: permet à la valeur d'initialisation de référencer la variable
+    (setf (gethash name *global-variables*) addr)
+    ;; Incrémenter l'offset (chaque variable prend 1 mot = 4 octets)
+    (incf *global-data-offset* 4)
+    
+    ;; Générer code d'initialisation si valeur fournie
+    (when value
+      ;; La valeur arrive brute (non parsée) - la parser d'abord
+      (let* ((parsed-value (parse-lisp-expr value))
+             (init-code (compile-expr parsed-value env)))
+        ;; Résultat dans $v0, le stocker à l'adresse globale
+        ;; Format: (SW src base offset) → stocker $v0 à ($zero + addr)
+        (setf code (append init-code (list (list :SW *reg-v0* *reg-zero* addr))))))
+    
+    ;; Retourner le code d'initialisation
+    code))
 
 ;;; ============================================================================
 ;;; COMPILATION - APPELS DE FONCTION
 ;;; ============================================================================
 
+(defun compile-intrinsic (func-name args env)
+  "Compile les fonctions intrinsèques de la VM (PHASE 11).
+   Ces fonctions sont inlinées directement sans appel de fonction réel.
+   
+   Intrinsèques supportées:
+   - (get-register :$sp) → (LW $zero offset $v0)  ; charge depuis *VM-REGISTERS*
+   - (set-register :$sp value) → (SW value $zero offset) ; stocke dans *VM-REGISTERS*
+   - (register-p x) → vérifie si x est un keyword de registre
+   - (get-reg :sp) → retourne :$sp (mapping des noms)"
+  (let ((code '()))
+    (case func-name
+      ;; GET-REGISTER: accès lecture à *VM-REGISTERS*[reg]
+      (get-register
+       (unless (= (length args) 1)
+         (error "GET-REGISTER attend 1 argument, reçu ~A" (length args)))
+       (let* ((reg-arg (first args))
+              (parsed-arg (parse-lisp-expr reg-arg)))
+         (cond
+           ;; Cas simple: keyword constant (:$sp, :$t0, etc.)
+           ((and (listp parsed-arg) (eq (first parsed-arg) :constant) (keywordp (second parsed-arg)))
+            (let* ((reg-keyword (second parsed-arg))
+                   (reg-index (reg-keyword-to-index reg-keyword)))
+              ;; *VM-REGISTERS* est un array, on accède par: mem[*VM-REGISTERS-ADDR* + reg-index]
+              ;; Pour simplification: on suppose *VM-REGISTERS* à l'offset 36 (après *VM-STATE*, *VM-INSTRUCTION-COUNT*, *HEAP-POINTER*)
+              ;; Chaque registre = 4 bytes
+              (let ((offset (+ 36 (* 4 reg-index))))
+                (setf code (list (list :LW *reg-zero* offset *reg-v0*))))))
+           ;; Cas avec GET-REG: (get-register (get-reg :sp))
+           ((and (listp parsed-arg) (eq (first parsed-arg) :call) (eq (second parsed-arg) 'get-reg))
+            ;; Compiler l'appel get-reg normalement (il sera traité comme intrinsèque)
+            ;; parsed-arg = (:call get-reg args)  où args est déjà parsée
+            ;; IMPORTANT: compiler reg-arg (brut), pas parsed-arg (déjà parsé)
+            (let* ((inner-result (compile-expr reg-arg env)))
+              ;; $v0 contient maintenant l'index du registre
+              ;; Calculer l'offset dynamiquement: offset = 36 + $v0 * 4
+              (setf code (append inner-result
+                               (list (list :LI 4 *reg-t0*)         ; $t0 = 4
+                                     (list :MUL *reg-v0* *reg-t0*)  ; $lo = $v0 * 4
+                                     (list :MFLO *reg-t0*)          ; $t0 = $lo
+                                     (list :ADDI *reg-t0* 36 *reg-t0*)  ; $t0 = $t0 + 36
+                                     ;; Charger depuis mem[$zero + $t0]
+                                     (list :ADD *reg-zero* *reg-t0* *reg-t1*)  ; $t1 = $zero + $t0
+                                     (list :LW *reg-t1* 0 *reg-v0*))))))  ; $v0 = mem[$t1]
+           ;; Cas variable: symbole $SP, $GP, etc. (sans :)
+           ;; On essaie de mapper le nom vers un keyword puis utiliser l'index
+           ((and (listp parsed-arg) (eq (first parsed-arg) :variable))
+            (let* ((var-name (second parsed-arg))
+                   ;; Essayer de convertir $SP → :$sp
+                   (reg-keyword (map-symbol-to-register-keyword var-name)))
+              (if reg-keyword
+                  ;; C'est un registre connu, accès direct
+                  (let* ((reg-index (reg-keyword-to-index reg-keyword))
+                         (offset (+ 36 (* 4 reg-index))))
+                    (setf code (list (list :LW *reg-zero* offset *reg-v0*))))
+                  ;; Sinon, erreur
+                  (error "GET-REGISTER: symbole ~A n'est pas un registre connu" var-name))))
+           ;; Cas complexe: expression calculée pour le registre
+           (t
+            (error "GET-REGISTER avec expression non supportée: ~A" parsed-arg)))))
+      
+      ;; SET-REGISTER: accès écriture à *VM-REGISTERS*[reg] = value
+      (set-register
+       (unless (= (length args) 2)
+         (error "SET-REGISTER attend 2 arguments, reçu ~A" (length args)))
+       (let* ((reg-arg (first args))
+              (value-arg (second args))
+              (parsed-reg (parse-lisp-expr reg-arg)))
+         (cond
+           ;; Cas simple: keyword constant + valeur
+           ((and (listp parsed-reg) (eq (first parsed-reg) :constant) (keywordp (second parsed-reg)))
+            (let* ((reg-keyword (second parsed-reg))
+                   (reg-index (reg-keyword-to-index reg-keyword))
+                   (offset (+ 36 (* 4 reg-index)))
+                   (value-code (compile-expr value-arg env)))
+              ;; Compiler la valeur puis la stocker
+              (setf code (append value-code
+                               (list (list :SW *reg-v0* *reg-zero* offset))))))
+           ;; Cas avec GET-REG
+           ((and (listp parsed-reg) (eq (first parsed-reg) :call) (eq (second parsed-reg) 'get-reg))
+            ;; IMPORTANT: compiler reg-arg (brut), pas parsed-reg (déjà parsé)
+            (let* ((inner-result (compile-expr reg-arg env))  ; Compiler get-reg
+                   (value-code (compile-expr value-arg env)))
+              ;; $v0 contient l'index après get-reg, puis la valeur après value-code
+              ;; Sauvegarder l'index temporairement
+              (setf code (append inner-result
+                               (list (list :MOVE *reg-v0* *reg-t2*))  ; $t2 = index
+                               value-code  ; $v0 = valeur
+                               (list (list :LI 4 *reg-t0*)
+                                     (list :MUL *reg-t2* *reg-t0*)  ; $lo = index * 4
+                                     (list :MFLO *reg-t0*)          ; $t0 = $lo
+                                     (list :ADDI *reg-t0* 36 *reg-t0*)
+                                     (list :ADD *reg-zero* *reg-t0* *reg-t1*)
+                                     (list :SW *reg-v0* *reg-t1* 0))))))
+           ;; Cas variable: $SP, $GP, etc.
+           ((and (listp parsed-reg) (eq (first parsed-reg) :variable))
+            (let* ((var-name (second parsed-reg))
+                   (reg-keyword (map-symbol-to-register-keyword var-name)))
+              (if reg-keyword
+                  (let* ((reg-index (reg-keyword-to-index reg-keyword))
+                         (offset (+ 36 (* 4 reg-index)))
+                         (value-code (compile-expr value-arg env)))
+                    (setf code (append value-code
+                                     (list (list :SW *reg-v0* *reg-zero* offset)))))
+                  (error "SET-REGISTER: symbole ~A n'est pas un registre connu" var-name))))
+           (t
+            (error "SET-REGISTER avec expression non supportée: ~A" parsed-reg)))))
+      
+      ;; REGISTER-P: vérifie si argument est un keyword de registre
+      (register-p
+       (unless (= (length args) 1)
+         (error "REGISTER-P attend 1 argument, reçu ~A" (length args)))
+       (let* ((arg (first args))
+              (parsed-arg (parse-lisp-expr arg)))
+         (cond
+           ;; Si argument est une constante keyword, évaluer statiquement
+           ((and (listp parsed-arg) (eq (first parsed-arg) :constant) (keywordp (second parsed-arg)))
+            (let* ((kw (second parsed-arg))
+                   (is-reg (member kw '(:$zero :$at :$v0 :$v1 :$a0 :$a1 :$a2 :$a3
+                                        :$t0 :$t1 :$t2 :$t3 :$t4 :$t5 :$t6 :$t7 :$t8 :$t9
+                                        :$s0 :$s1 :$s2 :$s3 :$s4 :$s5 :$s6 :$s7
+                                        :$k0 :$k1 :$gp :$sp :$fp :$ra :$pc :$hi :$lo
+                                        :$gt :$lt :$eq))))
+              ;; Retourner 1 si registre, 0 sinon
+              (setf code (list (list :LI (if is-reg 1 0) *reg-v0*)))))
+           ;; Si argument est une variable, compiler pour charger puis comparer
+           ((and (listp parsed-arg) (eq (first parsed-arg) :variable))
+            ;; Charger la variable puis vérifier si c'est un registre
+            ;; Pour simplification: on génère du code qui vérifie dynamiquement
+            (let ((var-code (compile-expr parsed-arg env)))
+              ;; $v0 contient maintenant la valeur de OPERAND
+              ;; Vérifier si elle est dans la plage des registres (0-37)
+              (setf code (append var-code
+                               (list (list :LI 0 *reg-t0*)          ; $t0 = 0
+                                     (list :SLT *reg-t0* *reg-v0* *reg-t1*)  ; $t1 = (0 < $v0)
+                                     (list :LI 38 *reg-t0*)         ; $t0 = 38
+                                     (list :SLT *reg-v0* *reg-t0* *reg-t2*)  ; $t2 = ($v0 < 38)
+                                     (list :AND *reg-t1* *reg-t2* *reg-v0*))))))  ; $v0 = $t1 && $t2
+           ;; Cas dynamique: pas supporté pour l'instant
+           (t
+            (error "REGISTER-P avec expression non supportée: ~A" parsed-arg)))))
+      
+      ;; GET-REG: mapping des noms courts vers noms complets
+      (get-reg
+       (unless (= (length args) 1)
+         (error "GET-REG attend 1 argument, reçu ~A" (length args)))
+       (let* ((arg (first args))
+              (parsed-arg (parse-lisp-expr arg)))
+         (cond
+           ;; Si argument est une constante keyword, mapper statiquement
+           ((and (listp parsed-arg) (eq (first parsed-arg) :constant) (keywordp (second parsed-arg)))
+            (let* ((short-name (second parsed-arg))
+                   (long-name (case short-name
+                                (:sp :$sp) (:ra :$ra) (:fp :$fp) (:pc :$pc)
+                                (:v0 :$v0) (:a0 :$a0) (:a1 :$a1) (:a2 :$a2) (:a3 :$a3)
+                                (:s0 :$s0) (:s1 :$s1) (:s2 :$s2) (:s3 :$s3)
+                                (:s4 :$s4) (:s5 :$s5) (:s6 :$s6) (:s7 :$s7)
+                                (:t0 :$t0) (:t1 :$t1) (:t2 :$t2) (:t3 :$t3)
+                                (:t4 :$t4) (:t5 :$t5) (:t6 :$t6) (:t7 :$t7)
+                                (:t8 :$t8) (:t9 :$t9) (:zero :$zero) (:gp :$gp)
+                                (t short-name))))  ; Si déjà long, garder tel quel
+              ;; Charger le keyword résultat comme constante
+              ;; NOTE: Les keywords sont représentés par leur INDEX dans le compilateur
+              (let ((reg-index (reg-keyword-to-index long-name)))
+                (setf code (list (list :LI reg-index *reg-v0*))))))
+           ;; Constante 0 (NIL) ou nombre
+           ((and (listp parsed-arg) (eq (first parsed-arg) :constant) (numberp (second parsed-arg)))
+            ;; Retourner la constante telle quelle (ex: PC=0 dans FETCH-INSTRUCTION)
+            (setf code (list (list :LI (second parsed-arg) *reg-v0*))))
+           ;; Si argument est une variable, essayer de mapper
+           ((and (listp parsed-arg) (eq (first parsed-arg) :variable))
+            (let* ((var-name (second parsed-arg))
+                   (reg-keyword (map-symbol-to-register-keyword var-name)))
+              (if reg-keyword
+                  ;; C'est un symbole de registre (ex: ZERO, PC, SP)
+                  (let ((reg-index (reg-keyword-to-index reg-keyword)))
+                    (setf code (list (list :LI reg-index *reg-v0*))))
+                  ;; Sinon erreur
+                  (error "GET-REG: symbole ~A n'est pas un registre connu" var-name))))
+           (t
+            (error "GET-REG avec expression non supportée: ~A" parsed-arg)))))
+      
+      (t
+       (error "Intrinsèque inconnue: ~A" func-name)))
+    
+    code))
+
+(defun reg-keyword-to-index (keyword)
+  "Convertit un keyword de registre en index numérique.
+   Ex: :$zero → 0, :$sp → 29, :$pc → 32, etc."
+  (case keyword
+    (:$zero 0) (:$at 1)
+    (:$v0 2) (:$v1 3)
+    (:$a0 4) (:$a1 5) (:$a2 6) (:$a3 7)
+    (:$t0 8) (:$t1 9) (:$t2 10) (:$t3 11) (:$t4 12) (:$t5 13) (:$t6 14) (:$t7 15)
+    (:$s0 16) (:$s1 17) (:$s2 18) (:$s3 19) (:$s4 20) (:$s5 21) (:$s6 22) (:$s7 23)
+    (:$t8 24) (:$t9 25)
+    (:$k0 26) (:$k1 27)
+    (:$gp 28) (:$sp 29) (:$fp 30) (:$ra 31)
+    (:$pc 32) (:$hi 33) (:$lo 34)
+    (:$gt 35) (:$lt 36) (:$eq 37)
+    ;; Anciens noms compatibilité
+    (:R0 0) (:R1 1) (:R2 2)
+    (:PL 32) (:FP 30) (:SP 29) (:HP 28)
+    (:GT 35) (:LT 36) (:EQ 37)
+    (t (error "Registre inconnu: ~A" keyword))))
+
+(defun map-symbol-to-register-keyword (symbol)
+  "Mappe un symbole ($SP, $GP, ZERO, etc.) vers un keyword de registre (:$sp, :$gp, :$zero).
+   Retourne NIL si le symbole n'est pas un registre connu.
+   
+   Exemples:
+   - $SP → :$sp
+   - $GP → :$gp
+   - ZERO → :$zero
+   - PC → :$pc"
+  (case symbol
+    ;; Symboles avec $ (style MIPS)
+    ($ZERO :$zero) ($AT :$at)
+    ($V0 :$v0) ($V1 :$v1)
+    ($A0 :$a0) ($A1 :$a1) ($A2 :$a2) ($A3 :$a3)
+    ($T0 :$t0) ($T1 :$t1) ($T2 :$t2) ($T3 :$t3) ($T4 :$t4) ($T5 :$t5) ($T6 :$t6) ($T7 :$t7)
+    ($S0 :$s0) ($S1 :$s1) ($S2 :$s2) ($S3 :$s3) ($S4 :$s4) ($S5 :$s5) ($S6 :$s6) ($S7 :$s7)
+    ($T8 :$t8) ($T9 :$t9)
+    ($K0 :$k0) ($K1 :$k1)
+    ($GP :$gp) ($SP :$sp) ($FP :$fp) ($RA :$ra)
+    ($PC :$pc) ($HI :$hi) ($LO :$lo)
+    ($GT :$gt) ($LT :$lt) ($EQ :$eq)
+    ;; Symboles sans $ (style ancien)
+    (ZERO :$zero) (AT :$at)
+    (V0 :$v0) (V1 :$v1)
+    (A0 :$a0) (A1 :$a1) (A2 :$a2) (A3 :$a3)
+    (T0 :$t0) (T1 :$t1) (T2 :$t2) (T3 :$t3) (T4 :$t4) (T5 :$t5) (T6 :$t6) (T7 :$t7)
+    (S0 :$s0) (S1 :$s1) (S2 :$s2) (S3 :$s3) (S4 :$s4) (S5 :$s5) (S6 :$s6) (S7 :$s7)
+    (T8 :$t8) (T9 :$t9)
+    (K0 :$k0) (K1 :$k1)
+    (GP :$gp) (SP :$sp) (FP :$fp) (RA :$ra)
+    (PC :$pc) (HI :$hi) (LO :$lo)
+    (GT :$gt) (LT :$lt) (EQ :$eq)
+    ;; Anciens noms compatibilité
+    (R0 :R0) (R1 :R1) (R2 :R2)
+    (PL :$pc) (HP :$gp) (MEM :$zero)
+    ;; Non trouvé
+    (t nil)))
+
 (defun compile-call (func-name args env)
-  "Compile un appel de fonction - gère static links pour closures et appels indirects (PHASE 9)"
+  "Compile un appel de fonction - gère static links pour closures et appels indirects (PHASE 9)
+   + PHASE 11: Gère intrinsèques (get-register, set-register, register-p, get-reg)"
+  
+  ;; PHASE 11: Support des fonctions intrinsèques VM
+  ;; Ces fonctions sont compilées directement sans appel de fonction
+  (when (and (symbolp func-name) (member func-name '(get-register set-register register-p get-reg)))
+    (return-from compile-call (compile-intrinsic func-name args env)))
+  
   (let* ((code '())
     (arg-regs (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*))
     ;; PHASE 9: Détecter si c'est un appel de closure
@@ -2103,7 +2538,8 @@ qui a défini la fonction, ou NIL si non trouvée."
                  ;; Sauvegarder $aX sur la pile
                  (setf code (append code (list (list :SW arg-reg *reg-sp* offset))))
                  ;; Charger depuis la pile vers $sX pour l'utiliser
-                 (setf code (append code (list (list :LW *reg-sp* offset saved-reg))))
+                 ;; Format: (LW dest base offset)
+                 (setf code (append code (list (list :LW saved-reg *reg-sp* offset))))
                  ;; Mapper le paramètre vers le registre sauvegardé
                  (add-variable new-env param saved-reg))))
     
@@ -2114,7 +2550,7 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; Épilogue: restaurer $ra et libérer la pile
     (let ((stack-size (+ 4 (* 4 num-params))))
       (setf code (append code
-                        (list (list :LW *reg-sp* 0 *reg-ra*)         ; Restaurer $ra
+                        (list (list :LW *reg-ra* *reg-sp* 0)         ; Restaurer $ra - Format: (LW dest base offset)
                               (list :ADDI *reg-sp* stack-size *reg-sp*)  ; Libérer pile
                               (list :JR *reg-ra*)))))            ; Retour
     
