@@ -646,7 +646,7 @@
 ;;; BOUCLE PRINCIPALE
 ;;; ============================================================================
 
-(defun run-vm (vm &key (max-instructions 1000000))
+(defun run-vm (vm &key (max-instructions 100000000))
   "Exécute la VM jusqu'à HALT ou erreur"
   (setf (vm-state vm) :running)
   (setf (vm-instruction-count vm) 0)

@@ -34,8 +34,8 @@
 ;;; CONSTANTES MÉMOIRE (depuis asm-ops.lisp)
 ;;; ============================================================================
 
-(defparameter *maxmem* 1048576
-  "Taille maximale de la mémoire (1 Mo)")
+(defparameter *maxmem* 10485760
+  "Taille maximale de la mémoire (10 Mo)")
 
 (defparameter *heap-size* 2000
   "Taille du tas dynamique")
@@ -694,11 +694,166 @@
   ;; Incrémenter le pointeur d'instruction ($pc)
   (let ((pc-reg (get-reg :pc)))
     (set-register pc-reg (1+ (get-register pc-reg)))))
+|#
 
 ;;; ============================================================================
 ;;; BOUCLE PRINCIPALE
 ;;; ============================================================================
 
+;;; VERSION RECURSIVE (sans WHILE qui n'est pas compilable)
+(defun run-vm-step (remaining-instructions)
+  "Exécute une instruction de la VM (récursif tail-call)"
+  (when (and (> remaining-instructions 0)
+             (= *vm-state* +state-running+))
+    (let ((instr (fetch-instruction)))
+      (if (or (not instr) (and (numberp instr) (= instr 0)))
+          (setq *vm-state* +state-error+)
+          (progn
+            (execute-instruction instr)
+            (setq *vm-instruction-count* (+ *vm-instruction-count* 1))
+            (run-vm-step (- remaining-instructions 1)))))))
+
+(defun run-vm (max-instructions)
+  "Exécute la VM jusqu'à HALT ou erreur"
+  (setq *vm-state* +state-running+)
+  (setq *vm-instruction-count* 0)
+  (run-vm-step max-instructions)
+  t)
+
+;;; ============================================================================
+;;; CHARGEMENT DE CODE (LOADER)
+;;; ============================================================================
+
+(defun collect-labels (asm-code code-start)
+  "Collecte tous les labels et leurs positions ABSOLUES
+   Retourne une liste d'association ((label . adresse) ...)"
+  (let ((labels nil)
+        (position 0)
+        (temp asm-code))
+    (while temp
+      (let ((instr (car temp)))
+        (if (and (listp instr) (eq (car instr) :LABEL))
+            ;; C'est un label, l'enregistrer
+            (setq labels (cons (cons (car (cdr instr)) (+ code-start position)) labels))
+            ;; Sinon incrémenter la position
+            (setq position (+ position 1))))
+      (setq temp (cdr temp)))
+    labels))
+
+(defun lookup-label (label labels)
+  "Cherche un label dans la liste d'association"
+  (let ((result nil)
+        (temp labels))
+    (while (and temp (not result))
+      (when (eq (car (car temp)) label)
+        (setq result (cdr (car temp))))
+      (setq temp (cdr temp)))
+    result))
+
+(defun resolve-labels (asm-code labels)
+  "Remplace les références symboliques par des adresses
+   Retourne le code résolu (sans les labels)"
+  (let ((resolved-code nil)
+        (temp asm-code))
+    (while temp
+      (let ((instr (car temp)))
+        (when (not (and (listp instr) (eq (car instr) :LABEL)))
+          ;; Ne pas inclure les labels dans le code final
+          (let ((resolved-instr nil)
+                (elem-temp instr))
+            ;; Parcourir chaque élément de l'instruction
+            (while elem-temp
+              (let ((element (car elem-temp)))
+                (let ((label-addr (when (symbolp element) 
+                                    (lookup-label element labels))))
+                  (if label-addr
+                      (setq resolved-instr (cons label-addr resolved-instr))
+                      (setq resolved-instr (cons element resolved-instr)))))
+              (setq elem-temp (cdr elem-temp)))
+            ;; Inverser l'instruction (on a construit à l'envers)
+            (let ((final-instr nil)
+                  (rev-temp resolved-instr))
+              (while rev-temp
+                (setq final-instr (cons (car rev-temp) final-instr))
+                (setq rev-temp (cdr rev-temp)))
+              (setq resolved-code (cons final-instr resolved-code))))))
+      (setq temp (cdr temp)))
+    ;; Inverser le code final
+    (let ((final-code nil))
+      (while resolved-code
+        (setq final-code (cons (car resolved-code) final-code))
+        (setq resolved-code (cdr resolved-code)))
+      final-code)))
+
+(defun preprocess-code (asm-code code-start)
+  "Préprocesse le code: collecte labels et résout références
+   Retourne (code-résolu . labels)"
+  (let* ((labels (collect-labels asm-code code-start))
+         (resolved-code (resolve-labels asm-code labels)))
+    (cons resolved-code labels)))
+
+(defun validate-instruction (opcode args)
+  "Valide qu'une instruction a le bon nombre d'arguments"
+  ;; Version simplifiée - on accepte tout pour l'instant
+  t)
+
+(defun validate-program (code)
+  "Valide que le code est une liste d'instructions valides"
+  (let ((valid t)
+        (temp code))
+    (while temp
+      (when (not (listp (car temp)))
+        (setq valid nil))
+      (setq temp (cdr temp)))
+    (when (not valid)
+      (error "Code invalide"))
+    ;; Valider chaque instruction
+    (setq temp code)
+    (while temp
+      (let ((instr (car temp)))
+        (validate-instruction (car instr) (cdr instr)))
+      (setq temp (cdr temp)))
+    t))
+
+(defun load-code (asm-code)
+  "Charge le code assembleur dans la mémoire de la VM
+   Ajoute automatiquement HALT à la fin"
+  (let* ((code-start (calculate-code-start))
+         ;; Ajouter HALT à la fin - construire la liste manuellement
+         (halt-instr (cons :HALT nil))
+         (asm-code-with-halt asm-code))
+    ;; Ajouter HALT à la fin
+    (let ((temp asm-code))
+      (if (not temp)
+          (setq asm-code-with-halt (cons halt-instr nil))
+          (progn
+            (while (cdr temp)
+              (setq temp (cdr temp)))
+            (setcdr temp (cons halt-instr nil))
+            (setq asm-code-with-halt asm-code))))
+    
+    ;; Préprocesser (retourne (code . labels))
+    (let* ((result (preprocess-code asm-code-with-halt code-start))
+           (resolved-code (car result)))
+      
+      ;; Valider
+      (validate-program resolved-code)
+      
+      ;; Charger en mémoire
+      (let ((addr 0)
+            (temp resolved-code))
+        (while temp
+          (mem-write (+ code-start addr) (car temp))
+          (setq addr (+ addr 1))
+          (setq temp (cdr temp))))
+      
+      ;; Initialiser $pc
+      (set-register (get-reg :pc) code-start)
+      
+      resolved-code)))
+
+#|
+;;; VERSION AVEC WHILE COMMENTEE
 (defun run-vm (max-instructions)
   "Exécute la VM jusqu'à HALT ou erreur"
   (setq *vm-state* +state-running+)
@@ -726,7 +881,7 @@
 ;;; ============================================================================
 
 (export '(;; Initialisation
-          make-new-vm reset-vm run-vm
+          make-new-vm reset-vm run-vm run-vm-step
           ;; Registres
           get-register set-register dump-registers reg-index
           ;; Mémoire
@@ -742,4 +897,7 @@
           get-value set-value calculate-code-start
           fetch-instruction execute-instruction
           ;; Heap management (Phase 9)
-          reset-heap vm-malloc *heap-pointer* +heap-limit+))
+          reset-heap vm-malloc *heap-pointer* +heap-limit+
+          ;; Loader functions (nouvelles)
+          load-code collect-labels resolve-labels preprocess-code
+          validate-program validate-instruction lookup-label))

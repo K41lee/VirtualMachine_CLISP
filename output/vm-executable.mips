@@ -9,8 +9,8 @@
 #
 # Statistiques:
 #   Globales:   19 formes (110 instructions)
-#   Fonctions:  22 (1670 instructions)
-#   TOTAL:      1780 instructions
+#   Fonctions:  27 (2090 instructions)
+#   TOTAL:      2200 instructions
 # ═══════════════════════════════════════════════════════════════════════════════
 
 .data
@@ -174,7 +174,7 @@ ARRAY_INIT_END_1:
     jr $ra
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FONCTIONS VM COMPILÉES (22 fonctions)
+# FONCTIONS VM COMPILÉES (27 fonctions)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 FN_RESET-HEAP:
@@ -1846,4 +1846,424 @@ FETCH-INSTRUCTION:
     addi $SP, $SP, 4
     lw 0, $SP($RA)
     addi $SP, $SP, 4
+    jr $RA
+FN_RUN-VM-STEP:
+RUN-VM-STEP:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    move $V0, $S0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $V0, $S3, $S2
+    beq $V0, $ZERO, AND_FALSE_1
+    lw 28, $ZERO($V0)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, EQUAL_3
+    li $V0, 0
+    j END_EQ_4
+EQUAL_3:
+    li $V0, 1
+END_EQ_4:
+    beq $V0, $ZERO, AND_FALSE_1
+    li $V0, 1
+    j AND_END_2
+AND_FALSE_1:
+    li $V0, 0
+AND_END_2:
+    beq $V0, $ZERO, WHEN_END_0
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal FETCH-INSTRUCTION
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    lw 0, $SP($V0)
+    beq $V0, $ZERO, NOT_TRUE_9
+    li $V0, 0
+    j NOT_END_10
+NOT_TRUE_9:
+    li $V0, 1
+NOT_END_10:
+    bne $V0, $ZERO, OR_TRUE_7
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal NUMBERP
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    beq $V0, $ZERO, AND_FALSE_11
+    lw 0, $SP($V0)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, EQUAL_13
+    li $V0, 0
+    j END_EQ_14
+EQUAL_13:
+    li $V0, 1
+END_EQ_14:
+    beq $V0, $ZERO, AND_FALSE_11
+    li $V0, 1
+    j AND_END_12
+AND_FALSE_11:
+    li $V0, 0
+AND_END_12:
+    bne $V0, $ZERO, OR_TRUE_7
+    li $V0, 0
+    j OR_END_8
+OR_TRUE_7:
+    li $V0, 1
+OR_END_8:
+    beq $V0, $ZERO, ELSE_5
+    li $V0, 3
+    sw $V0, 28($ZERO)
+    j ENDIF_6
+ELSE_5:
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal EXECUTE-INSTRUCTION
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 32, $ZERO($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    sw $V0, 32($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    move $V0, $S0
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    sub $V0, $T0, $V0
+    move $A0, $V0
+    jal RUN-VM-STEP
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+ENDIF_6:
+    addi $SP, $SP, 4
+WHEN_END_0:
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_RUN-VM:
+RUN-VM:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    li $V0, 1
+    sw $V0, 28($ZERO)
+    li $V0, 0
+    sw $V0, 32($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    move $V0, $S0
+    move $A0, $V0
+    jal RUN-VM-STEP
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_LOOKUP-LABEL:
+LOOKUP-LABEL:
+    addi $SP, $SP, -12
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    sw $A1, 8($SP)
+    lw 8, $SP($S1)
+    li $V0, 0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    move $V0, $S1
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+WHILE_START_0:
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, AND_FALSE_2
+    lw 0, $SP($V0)
+    beq $V0, $ZERO, NOT_TRUE_4
+    li $V0, 0
+    j NOT_END_5
+NOT_TRUE_4:
+    li $V0, 1
+NOT_END_5:
+    beq $V0, $ZERO, AND_FALSE_2
+    li $V0, 1
+    j AND_END_3
+AND_FALSE_2:
+    li $V0, 0
+AND_END_3:
+    beq $V0, $ZERO, WHILE_END_1
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CAR_NULL_9
+    lw 0, $V0($V0)
+    j CAR_END_10
+CAR_NULL_9:
+    move $V0, $ZERO
+CAR_END_10:
+    beq $V0, $ZERO, CAR_NULL_7
+    lw 0, $V0($V0)
+    j CAR_END_8
+CAR_NULL_7:
+    move $V0, $ZERO
+CAR_END_8:
+    move $A0, $V0
+    move $V0, $S0
+    move $A1, $V0
+    jal EQ
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    beq $V0, $ZERO, WHEN_END_6
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CAR_NULL_13
+    lw 0, $V0($V0)
+    j CAR_END_14
+CAR_NULL_13:
+    move $V0, $ZERO
+CAR_END_14:
+    beq $V0, $ZERO, CDR_NULL_11
+    lw 1, $V0($V0)
+    j CDR_END_12
+CDR_NULL_11:
+    move $V0, $ZERO
+CDR_END_12:
+    sw $V0, 0($SP)
+WHEN_END_6:
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CDR_NULL_15
+    lw 1, $V0($V0)
+    j CDR_END_16
+CDR_NULL_15:
+    move $V0, $ZERO
+CDR_END_16:
+    sw $V0, 4($SP)
+    j WHILE_START_0
+WHILE_END_1:
+    move $V0, $ZERO
+    lw 0, $SP($V0)
+    addi $SP, $SP, 8
+    lw 0, $SP($RA)
+    addi $SP, $SP, 12
+    jr $RA
+FN_VALIDATE-INSTRUCTION:
+VALIDATE-INSTRUCTION:
+    addi $SP, $SP, -12
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    sw $A1, 8($SP)
+    lw 8, $SP($S1)
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 12
+    jr $RA
+FN_VALIDATE-PROGRAM:
+VALIDATE-PROGRAM:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    li $V0, 1
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    move $V0, $S0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+WHILE_START_0:
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, WHILE_END_1
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CAR_NULL_5
+    lw 0, $V0($V0)
+    j CAR_END_6
+CAR_NULL_5:
+    move $V0, $ZERO
+CAR_END_6:
+    move $A0, $V0
+    jal LISTP
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    beq $V0, $ZERO, NOT_TRUE_3
+    li $V0, 0
+    j NOT_END_4
+NOT_TRUE_3:
+    li $V0, 1
+NOT_END_4:
+    beq $V0, $ZERO, WHEN_END_2
+    li $V0, 0
+    sw $V0, 0($SP)
+WHEN_END_2:
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CDR_NULL_7
+    lw 1, $V0($V0)
+    j CDR_END_8
+CDR_NULL_7:
+    move $V0, $ZERO
+CDR_END_8:
+    sw $V0, 4($SP)
+    j WHILE_START_0
+WHILE_END_1:
+    move $V0, $ZERO
+    lw 0, $SP($V0)
+    beq $V0, $ZERO, NOT_TRUE_10
+    li $V0, 0
+    j NOT_END_11
+NOT_TRUE_10:
+    li $V0, 1
+NOT_END_11:
+    beq $V0, $ZERO, WHEN_END_9
+    # Unknown instruction: (HALT)
+WHEN_END_9:
+    move $V0, $S0
+    sw $V0, 4($SP)
+WHILE_START_12:
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, WHILE_END_13
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CAR_NULL_14
+    lw 0, $V0($V0)
+    j CAR_END_15
+CAR_NULL_14:
+    move $V0, $ZERO
+CAR_END_15:
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 8, $SP($V0)
+    beq $V0, $ZERO, CAR_NULL_16
+    lw 0, $V0($V0)
+    j CAR_END_17
+CAR_NULL_16:
+    move $V0, $ZERO
+CAR_END_17:
+    move $A0, $V0
+    lw 8, $SP($V0)
+    beq $V0, $ZERO, CDR_NULL_18
+    lw 1, $V0($V0)
+    j CDR_END_19
+CDR_NULL_18:
+    move $V0, $ZERO
+CDR_END_19:
+    move $A1, $V0
+    jal VALIDATE-INSTRUCTION
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, 4
+    lw 4, $SP($V0)
+    beq $V0, $ZERO, CDR_NULL_20
+    lw 1, $V0($V0)
+    j CDR_END_21
+CDR_NULL_20:
+    move $V0, $ZERO
+CDR_END_21:
+    sw $V0, 4($SP)
+    j WHILE_START_12
+WHILE_END_13:
+    move $V0, $ZERO
+    li $V0, 1
+    addi $SP, $SP, 8
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
     jr $RA
