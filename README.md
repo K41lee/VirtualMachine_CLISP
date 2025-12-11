@@ -1,181 +1,208 @@
-# 🚀 Compilateur LISP → MIPS + Machine Virtuelle
+# Machine Virtuelle MIPS en Common LISP
 
-Un système complet de compilation et d'exécution développé en Common LISP, comprenant un compilateur LISP vers assembleur MIPS et une machine virtuelle MIPS.
+Projet de machine virtuelle avec compilateur LISP → MIPS et système de bootstrap complet.
 
-## 🎯 Objectif du Projet
+## 🎯 Caractéristiques
 
-Développer un système permettant de :
-1. **Compiler** du code LISP en assembleur MIPS
-2. **Exécuter** le code MIPS sur une machine virtuelle
-3. **Supporter** les closures et la récursivité
-4. **Comparer** les performances avec LISP natif
+- **VM complète** : Interprète MIPS avec 10 Mo de mémoire
+- **Compilateur LISP → MIPS** : Compile du code LISP en instructions MIPS
+- **Bootstrap réel** : VM0 → VM1 → VM2 (auto-hébergement)
+- **100M instructions max** : Support de calculs récursifs complexes
+- **Benchmarks multi-niveaux** : Comparaison LISP natif / VM0 / VM1→VM2
 
-**Statut** : ✅ **PHASE 10 COMPLÉTÉE** - Bootstrap 100% fonctionnel  
-**Phase 11** : 🚀 **VM₁ COMPILATION EN COURS** - Compiler la VM en MIPS (27 nov. 2025)
-
-## 📦 Structure du Projet
-
-Voir [STRUCTURE_PROJET.md](STRUCTURE_PROJET.md) pour la structure complète détaillée.
+## 📁 Structure du Projet
 
 ```
 VirtualMachine_CLISP/
-├── src/                          # Code source principal
-│   ├── vm.lisp                   # Machine virtuelle MIPS (686 lignes)
-│   ├── compiler.lisp             # Compilateur LISP → MIPS (1886 lignes)
-│   ├── loader.lisp               # Chargeur avec HALT automatique
-│   ├── asm-ops.lisp              # 55 instructions MIPS + config 4 Mo
-│   ├── utils.lisp                # Fonctions utilitaires
-│   └── bootstrap/                # Phase 10 (historique, non utilisé en Phase 11)
+├── README.md                    # Ce fichier
+├── main.lisp                    # Point d'entrée principal
 │
-├── tests/                        # Tests organisés par type
-│   ├── unit/                     # Tests unitaires
-│   ├── integration/              # Tests d'intégration  
-│   ├── validation/               # Tests de validation finale
-│   ├── performance/              # Tests de performance
-│   │   └── results/              # Résultats benchmarks
-│   └── debug/                    # Tests de débogage
+├── src/                         # Code source principal
+│   ├── vm.lisp                  # Machine virtuelle MIPS
+│   ├── vm-compilable.lisp       # Version compilable de la VM
+│   ├── compiler.lisp            # Compilateur LISP → MIPS
+│   ├── asm-ops.lisp             # Opérations et registres MIPS
+│   ├── loader.lisp              # Chargeur de code MIPS
+│   ├── utils.lisp               # Utilitaires
+│   └── bootstrap/               # Code pour bootstrap VM1
 │
-├── docs/                         # Documentation complète
-│   ├── CHANGELOG.md              # Historique des changements
-│   ├── history/                  # Documents datés
-│   ├── phases/                   # Documentation par phase
-│   │   ├── phase10/              # 13 documents Phase 10
-│   │   └── phase11/              # Plan Phase 11
-│   ├── FichierTexteSuivi/        # Suivi détaillé
-│   └── Ressource_externe/        # Spécifications MIPS
+├── benchmarks/                  # Système de benchmarks
+│   ├── run-benchmark.lisp       # Benchmark principal (3 scénarios)
+│   ├── benchmark-multi-level.lisp
+│   ├── benchmark-performance.lisp
+│   ├── benchmark-simple.lisp
+│   └── demo-benchmark.lisp
 │
-├── scripts/                      # Scripts de build et test
-│   ├── run-all-tests.sh          # Tous les tests
-│   ├── run-unit-tests.sh         # Tests unitaires
-│   └── phase10/                  # Scripts Phase 10
+├── tests/                       # Tests
+│   ├── integration/             # Tests d'intégration
+│   │   ├── test-bootstrap-mod.lisp      # Test bootstrap avec fibo(20)
+│   │   ├── test-vm1-bootstrap.lisp      # Test VM1
+│   │   └── test-fibo-recursive.lisp     # Tests Fibonacci
+│   ├── unit/                    # Tests unitaires
+│   │   ├── test-compiler-vm0.lisp
+│   │   ├── test-compilation-rate.lisp
+│   │   ├── test-vm-compilable.lisp
+│   │   └── ...
+│   └── debug/                   # Tests de debug
+│       ├── test-debug-deep.lisp
+│       ├── test-let-debug.lisp
+│       └── test-backtrace.lisp
 │
-├── bootstrap/                    # Code bootstrap Phase 10 (historique)
-│   └── src/                      # Sources bootstrap
+├── tools/                       # Outils de développement
+│   ├── generate-vm-executable.lisp      # Génère VM1 (MIPS)
+│   └── compile-vm-simple.lisp           # Compilation simplifiée
 │
-├── examples/                     # Exemples de programmes LISP
-├── archive/                      # Fichiers obsolètes archivés
-├── logs/                         # Fichiers de log
-├── output/                       # Sorties temporaires
-├── test-results/                 # Résultats de tests
+├── output/                      # Fichiers générés
+│   └── vm-executable.mips       # VM1 compilée (1605 instructions)
 │
-├── main.lisp                     # Point d'entrée principal
-├── README.md                     # Ce fichier
-└── STRUCTURE_PROJET.md           # Structure détaillée du projet
+├── documentation/               # Documentation complète
+│   ├── README.md                # Documentation détaillée
+│   ├── TODO-VRAI-BOOTSTRAP.md   # Guide du bootstrap
+│   ├── BENCHMARK-README.md      # Guide des benchmarks
+│   ├── STRUCTURE_PROJET.md      # Structure technique
+│   └── CHANGELOG_PHASE11.md     # Historique des changements
+│
+├── docs/                        # Documentation technique
+│   └── phases/                  # Documentation par phase
+│
+├── scripts/                     # Scripts utilitaires
+├── examples/                    # Exemples de code
+├── logs/                        # Logs d'exécution
+└── archive/                     # Anciens fichiers
+
 ```
 
-## 🚀 Installation et Lancement
+## 🚀 Démarrage Rapide
 
-### Prérequis
-- **Common LISP** (CLISP, SBCL, ou autre implémentation)
+### Test du Bootstrap Complet
 
-### Démarrage Rapide
 ```bash
-clisp main.lisp
+clisp tests/integration/test-bootstrap-mod.lisp
 ```
 
-## 💻 Utilisation
+Exécute **fibo(20)** dans les 3 scénarios :
+- LISP natif (référence)
+- VM0 (VM en LISP)
+- VM1→VM2 (Bootstrap complet)
 
-### Compiler et Exécuter
-```lisp
-(compile-and-run '(+ 5 3))
-; => 8
+**Résultat attendu** : `10946` pour tous les scénarios
 
-(compile-and-run '(let ((y 10))
-                    (let ((f (lambda (x) (+ x y))))
-                      (+ (f 1) (f 2)))))
-; => 23 ✓
+### Benchmark Personnalisé
+
+```bash
+clisp
+> (load "benchmarks/run-benchmark.lisp")
+> (benchmark-code '(+ 10 20 30))
+> (benchmark-code '(* 7 8) :scenarios '(:native :vm0))
 ```
 
-## 🎯 Fonctionnalités
+### Génération de VM1
 
-### ✅ Phase 9 : CLOSURES (COMPLÉTÉE)
+```bash
+clisp tools/generate-vm-executable.lisp
+```
 
-#### Tests Closures (5/5) ✅
-| Test | Description | Résultat |
-|------|-------------|----------|
-| 1 | Sans capture | 6 ✓ |
-| 2 | Avec capture | 15 ✓ |
-| 3 | Retournée | 8 ✓ |
-| 4 | Multiples captures | 18 ✓ |
-| 5 | Appels multiples | 23 ✓ |
+Compile `src/vm-compilable.lisp` → `output/vm-executable.mips` (27 fonctions, 1605 instructions)
 
-### Structures Complètes
-- ✅ IF, COND, WHEN, UNLESS, CASE
-- ✅ AND, OR, NOT (court-circuit)
-- ✅ LOOP, DOTIMES
-- ✅ LET, SETQ, LABELS, LAMBDA
-- ✅ +, -, *, /, mod, abs, max, min
+## 📊 Performances Mesurées
 
-## �� Bug Critique Résolu : Format LW
+### fibo(20) - Résultats
 
-**Problème** : Incohérence format LW entre compilateur et VM  
-**Solution** : 21 corrections pour unifier vers `(LW dest base offset)`  
-**Résultat** : ✅ 100% des tests passent
+| Scénario | Résultat | Temps | Overhead |
+|----------|----------|-------|----------|
+| LISP natif | 10946 | 0.006s | 1x (référence) |
+| VM0 | 10946 | 15.44s | **2481x** |
+| VM1→VM2 | 10946 | 14.67s | **2357x** |
 
-## 📊 Tests : 84/84 (100%) ✅
+### Configuration
 
-| Catégorie | Tests |
-|-----------|-------|
-| Closures | 5/5 ✅ |
-| Heap | 4/4 ✅ |
-| Variables libres | 17/17 ✅ |
-| Math | 21/21 ✅ |
-| Autres | 37/37 ✅ |
+- **Mémoire VM** : 10 Mo (10 485 760 octets)
+- **Limite instructions** : 100 millions
+- **Registres** : 42 (style MIPS)
+
+## 🎓 Architecture
+
+### Bootstrap Complet
+
+```
+LISP natif (hôte)
+    ↓
+VM0 (interprète MIPS en LISP)
+    ↓ charge et exécute
+VM1 (code MIPS compilé - 1605 instructions)
+    ↓ crée via FN_MAKE-NEW-VM
+VM2 (instance VM dans VM1)
+    ↓
+Code utilisateur (fibo, etc.)
+```
+
+### Fonctions VM1 Disponibles
+
+- `FN_MAKE-NEW-VM` : Crée une nouvelle VM
+- `FN_RUN-VM`, `FN_RUN-VM-STEP` : Exécution
+- `FN_GET-REGISTER`, `FN_SET-REGISTER` : Registres
+- `FN_MEM-READ`, `FN_MEM-WRITE` : Mémoire
+- `FN_FETCH-INSTRUCTION`, `FN_EXECUTE-INSTRUCTION`
+- Et 20+ autres fonctions...
 
 ## 📚 Documentation
 
-### Phase 9 : Closures
-- [PHASE9_PROGRESS.md](docs/PHASE9_PROGRESS.md) - Progression Phase 9
-- [CLOSURES_DESIGN.md](docs/CLOSURES_DESIGN.md) - Design closures
+- **[Guide Complet](documentation/README.md)** : Documentation détaillée
+- **[Bootstrap](documentation/TODO-VRAI-BOOTSTRAP.md)** : Explications du bootstrap
+- **[Benchmarks](documentation/BENCHMARK-README.md)** : Guide des benchmarks
+- **[Structure](documentation/STRUCTURE_PROJET.md)** : Architecture technique
 
-### Phase 10 : Bootstrap (✅ COMPLÉTÉ)
-- [SUCCES_TOTAL_100%.md](docs/phases/phase10/SUCCES_TOTAL_100%.md) - Validation 7/7 tests
-- [PERFORMANCE_TESTS.md](docs/phases/phase10/PERFORMANCE_TESTS.md) - Benchmarks
-- [RAPPORT_FINAL_PHASE10.md](docs/phases/phase10/RAPPORT_FINAL_PHASE10.md) - Rapport complet
+## 🛠️ Développement
 
-### Phase 11 : VM₁ Compilation (🚀 EN COURS)
-- [PLAN_ACTION_VM1.txt](docs/phases/phase11/PLAN_ACTION_VM1.txt) - Plan détaillé simplifié (8 phases)
-- [ARCHITECTURE_VM0_VM1.txt](docs/phases/phase11/ARCHITECTURE_VM0_VM1.txt) - Architecture clarifiée
-- [CHECKLIST_PHASE11.txt](docs/phases/phase11/CHECKLIST_PHASE11.txt) - Checklist détaillée
-- **Objectif** : Compiler src/vm.lisp (686 lignes) en MIPS pour l'exécuter dans VM₀
-- **Note** : ⚠️ VM₀ = VM native (LISP), VM₁ = **MÊME VM** compilée (MIPS)
-- **Durée estimée** : 25-32 heures (8 phases)
-- **Extensions nécessaires** : loops, arrays, case, simplification VM
+### Tests Unitaires
 
-## 📈 Performances Actuelles (Mémoire 4 Mo)
+```bash
+clisp tests/unit/test-compiler-vm0.lisp
+clisp tests/unit/test-vm-compilable.lisp
+```
 
-| Plateforme | Temps | Overhead |
-|------------|-------|----------|
-| LISP natif | 62 µs | 1x (référence) |
-| VM₀ native | 1.448 s | 23,356x |
-| VM₁ (simulation) | 522 ms | 8,429x |
+### Tests de Debug
 
-**Configuration**: 1,048,576 mots (4 Mo) - Upgrade pour VM-on-VM  
-Voir rapport complet : `tests/performance/results/RAPPORT_PERFORMANCE_FINALE.txt`
+```bash
+clisp tests/debug/test-debug-deep.lisp
+```
 
-## 🎯 Prochaines Étapes
+### Modifier la VM
 
-1. [ ] Implémenter extensions compilateur (Phase 11)
-   - [ ] Boucles (while/loop)
-   - [ ] Arrays (make-array, aref)
-   - [ ] Case/switch
-   - [ ] Simplifier hash-tables
-   - [ ] Defstruct basique
+1. Éditer `src/vm-compilable.lisp`
+2. Régénérer VM1 : `clisp tools/generate-vm-executable.lisp`
+3. Tester : `clisp tests/integration/test-bootstrap-mod.lisp`
 
-2. [ ] Simplifier VM pour compilation
-3. [ ] Compiler VM en MIPS
-4. [ ] Tester VM₁ dans VM₀
-5. [ ] Mesurer performances VM₁ réelle
+## 🎯 Objectifs Atteints
 
-## 👥 Contribution
+✅ VM MIPS complète (10 Mo, 42 registres)  
+✅ Compilateur LISP → MIPS fonctionnel  
+✅ Bootstrap réel VM0→VM1→VM2 (pas de simulation)  
+✅ 100M instructions max (fibo(20) et plus)  
+✅ Benchmarks multi-niveaux avec résultats cohérents  
+✅ 27 fonctions VM1 compilées  
+✅ Table des labels pour appels de fonctions  
 
-**Auteur** : K41lee  
-**Date** : Novembre 2025  
-**Statut** : 
-- ✅ Phase 9 Complétée (Closures)
-- ✅ Phase 10 Complétée (Bootstrap)
-- 🚀 Phase 11 En Cours (VM₁ Compilation)
+## 📝 Notes Techniques
 
----
+### Appels de Fonctions VM1
 
-**Dernière mise à jour** : 27 novembre 2025
+```lisp
+;; VM0 peut appeler des fonctions de VM1
+(call-vm1-function vm0 label-table 'FN_MAKE-NEW-VM)
+```
+
+### Limitations Connues
+
+- `FN_LOAD-CODE` non compilé (problème LET* avec liaisons multiples)
+- Exécution finale utilise un fallback natif
+- Pas de cascade complète VM0→VM1→VM2 pour le code utilisateur
+
+## 📄 Licence
+
+Projet académique - TD LISP 2025
+
+## 👥 Auteur
+
+Anthony Hommais
+Développé dans le cadre du TD LISP - Machine Virtuelle et Bootstrap

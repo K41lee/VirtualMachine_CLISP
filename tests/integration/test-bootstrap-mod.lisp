@@ -1,9 +1,9 @@
 ;;; Test Bootstrap : Calcul de Fibonacci avec DEFUN récursif
-;;; Commande : clisp test-bootstrap-mod.lisp
-;;; Note: Fibonacci récursif est très lent, on utilise n=14
-;;;       Avec fib(0)=1, fib(1)=1 : fib(14) = 610
+;;; Commande : clisp tests/integration/test-bootstrap-mod.lisp
+;;; Note: Fibonacci récursif est très lent, on utilise n=20
+;;;       Avec fib(0)=1, fib(1)=1 : fib(20) = 10946
 
-(load "run-benchmark.lisp")
+(load "benchmarks/run-benchmark.lisp")
 
 ;; Version récursive de Fibonacci avec DEFUN (comme demandé)
 ;; Convention : fib(0)=1, fib(1)=1
