@@ -352,6 +352,66 @@ qui a défini la fonction, ou NIL si non trouvée."
          (dotimes
           (list :dotimes (first args) (rest args)))
          
+         ;; INCF (incrémentation - PHASE 11 Sprint 1.2)
+         (incf
+          ;; Syntaxe: (incf place [delta])
+          ;; Équivalent à: (setq place (+ place delta))
+          (if (>= (length args) 1)
+              (list :incf (first args) (if (second args) (second args) 1))
+              (error "INCF requiert au moins 1 argument: ~A" expr)))
+         
+         ;; DECF (décrémentation - PHASE 11 Sprint 1.2)
+         (decf
+          ;; Syntaxe: (decf place [delta])
+          ;; Équivalent à: (setq place (- place delta))
+          (if (>= (length args) 1)
+              (list :decf (first args) (if (second args) (second args) 1))
+              (error "DECF requiert au moins 1 argument: ~A" expr)))
+         
+         ;; LIST OPERATIONS (PHASE 11 Sprint 2.1)
+         
+         ;; CONS (construction de cons cell)
+         (cons
+          ;; Syntaxe: (cons car-value cdr-value)
+          (if (= (length args) 2)
+              (list :cons (first args) (second args))
+              (error "CONS requiert exactement 2 arguments: ~A" expr)))
+         
+         ;; CAR (accès au premier élément)
+         (car
+          ;; Syntaxe: (car cons-cell)
+          (if (= (length args) 1)
+              (list :car (first args))
+              (error "CAR requiert exactement 1 argument: ~A" expr)))
+         
+         ;; CDR (accès au reste)
+         (cdr
+          ;; Syntaxe: (cdr cons-cell)
+          (if (= (length args) 1)
+              (list :cdr (first args))
+              (error "CDR requiert exactement 1 argument: ~A" expr)))
+         
+         ;; NULL (test de liste vide)
+         (null
+          ;; Syntaxe: (null expr)
+          ;; Retourne vrai (1) si expr = 0 (NIL)
+          (if (= (length args) 1)
+              (list :null (first args))
+              (error "NULL requiert exactement 1 argument: ~A" expr)))
+         
+         ;; DOLIST (itération sur liste - PHASE 11 Sprint 2.2)
+         (dolist
+          ;; Syntaxe: (dolist (var list-expr) body...)
+          ;; Équivalent à macro expansion avec WHILE/CAR/CDR/NULL
+          (if (and (>= (length args) 2)
+                   (listp (first args))
+                   (= (length (first args)) 2))
+              (let ((var (first (first args)))
+                    (list-expr (second (first args)))
+                    (body (rest args)))
+                (list :dolist var list-expr body))
+              (error "Syntaxe DOLIST incorrecte: (dolist (var list) body...) ~A" expr)))
+         
          ;; SETQ (assignation variable)
          (setq
           ;; PHASE 11: Détecter cas spécial (setf (aref array index) value)
@@ -1032,7 +1092,7 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; Compiler le test
     (setf code (append code (compile-expr test env)))
     
-    ;; Si test != 0 (vrai), sauter le body
+    ;; Si test != 0 (vrai), sauter le body et retourner 0
     (setf code (append code
                       (list (list :BNE *reg-v0* *reg-zero* label-skip))))
     
@@ -1042,8 +1102,9 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     (setf code (append code (list (list :J label-end))))
     
-    ;; Label skip
+    ;; Label skip : mettre $V0 à 0 (nil)
     (setf code (append code (list (list :LABEL label-skip))))
+    (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
     
     ;; Label fin
     (setf code (append code (list (list :LABEL label-end))))
@@ -1358,6 +1419,85 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     code))
 
+(defun compile-dolist (var list-expr body env)
+  "Compile (dolist (var list-expr) body...)
+   PHASE 11 Sprint 2.2 - Itération sur listes
+   
+   Utilise $S1 pour temp-list et $S2 pour var (callee-saved registers)
+   Similaire à DOTIMES mais avec navigation CAR/CDR/NULL"
+  (let* ((label-start (gen-label env "DOLIST_START"))
+         (label-end (gen-label env "DOLIST_END"))
+         (code '()))
+    
+    ;; 1. Sauvegarder $s1 et $s2 sur pile
+    (setf code (append code
+                      (list (list :ADDI *reg-sp* -8 *reg-sp*)
+                            (list :SW *reg-s1* *reg-sp* 0)
+                            (list :SW *reg-s2* *reg-sp* 4))))
+    
+    ;; 2. Sauvegarder $t0-$t3 (pour préserver variables parent)
+    (setf code (append code
+                      (list (list :ADDI *reg-sp* -16 *reg-sp*)
+                            (list :SW *reg-t0* *reg-sp* 0)
+                            (list :SW *reg-t1* *reg-sp* 4)
+                            (list :SW *reg-t2* *reg-sp* 8)
+                            (list :SW *reg-t3* *reg-sp* 12))))
+    
+    ;; 3. Évaluer list-expr AVANT de créer nouvel environnement
+    (setf code (append code (compile-expr list-expr env)))
+    
+    ;; 4. Stocker résultat dans $s1 (temp-list)
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-s1*))))
+    
+    ;; 5. Restaurer $t0-$t3
+    (setf code (append code
+                      (list (list :LW *reg-t0* *reg-sp* 0)
+                            (list :LW *reg-t1* *reg-sp* 4)
+                            (list :LW *reg-t2* *reg-sp* 8)
+                            (list :LW *reg-t3* *reg-sp* 12)
+                            (list :ADDI *reg-sp* 16 *reg-sp*))))
+    
+    ;; 6. Créer nouvel environnement pour le body
+    (let ((new-env (copy-env env)))
+      
+      ;; 7. Label début de boucle
+      (setf code (append code (list (list :LABEL label-start))))
+      
+      ;; 8. Tester si temp-list ($s1) est NULL
+      (setf code (append code (list (list :BEQ *reg-s1* *reg-zero* label-end))))
+      
+      ;; 9. Extraire var = (car temp-list)
+      ;; CAR = charger mot 0 de $s1
+      (setf code (append code (list (list :LW *reg-s2* *reg-s1* 0))))
+      
+      ;; 10. Ajouter var à l'environnement (dans registre $s2)
+      (add-variable new-env var *reg-s2*)
+      
+      ;; 11. Exécuter le body
+      (dolist (expr body)
+        (setf code (append code (compile-expr expr new-env))))
+      
+      ;; 12. Avancer temp-list: temp-list = (cdr temp-list)
+      ;; CDR = charger mot 1 de $s1
+      (setf code (append code (list (list :LW *reg-s1* *reg-s1* 1))))
+      
+      ;; 13. Retour au début
+      (setf code (append code (list (list :J label-start))))
+      
+      ;; 14. Label fin
+      (setf code (append code (list (list :LABEL label-end))))
+      
+      ;; 15. Restaurer $s1 et $s2
+      (setf code (append code
+                        (list (list :LW *reg-s1* *reg-sp* 0)
+                              (list :LW *reg-s2* *reg-sp* 4)
+                              (list :ADDI *reg-sp* 8 *reg-sp*))))
+      
+      ;; 16. DOLIST retourne NIL
+      (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
+      
+      code)))
+
 (defun compile-progn (exprs env)
   "Compile (progn expr1 expr2 ... exprN)
    PHASE 11 - Extension pour séquences d'expressions + Support DEFUN
@@ -1435,7 +1575,8 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;;   addr = $gp
     ;;   $gp = $gp + size
     ;;   return addr
-    (let ((reg-gp (get-reg :gp)))  ; $gp = registre 28
+    ;; BUG FIX PHASE 11: get-reg est une intrinsèque de compilation, pas une fonction runtime
+    (let ((reg-gp :$GP))  ; $gp = registre 28
       ;; addr = $gp (sauvegarder dans $v0)
       (setf code (append code (list (list :MOVE reg-gp *reg-v0*))))
       ;; $gp = $gp + size (où size est dans $a0)
@@ -1697,6 +1838,161 @@ qui a défini la fonction, ou NIL si non trouvée."
              (error "Variable non définie dans SETQ: ~A" var)))
           
           code))))
+
+;;; ============================================================================
+;;; COMPILATION - INCF/DECF (PHASE 11 Sprint 1.2)
+;;; ============================================================================
+
+(defun compile-incf (place delta env)
+  "Compile (incf place [delta])
+   Syntaxe: (incf var) ou (incf var 5)
+   Équivalent à: (setq var (+ var delta))
+   Retourne la nouvelle valeur"
+  ;; Transformation en SETQ avec addition
+  ;; (incf x) → (setq x (+ x 1))
+  ;; (incf x 5) → (setq x (+ x 5))
+  (let ((increment-expr (list '+ place delta)))
+    (compile-setq place increment-expr env)))
+
+(defun compile-decf (place delta env)
+  "Compile (decf place [delta])
+   Syntaxe: (decf var) ou (decf var 3)
+   Équivalent à: (setq var (- var delta))
+   Retourne la nouvelle valeur"
+  ;; Transformation en SETQ avec soustraction
+  ;; (decf x) → (setq x (- x 1))
+  ;; (decf x 3) → (setq x (- x 3))
+  (let ((decrement-expr (list '- place delta)))
+    (compile-setq place decrement-expr env)))
+
+;;; ============================================================================
+;;; COMPILATION - LIST OPERATIONS (PHASE 11 Sprint 2.1)
+;;; ============================================================================
+
+(defun compile-cons (car-expr cdr-expr env)
+  "Compile (cons car-value cdr-value)
+   Alloue une cons cell de 2 mots sur le tas:
+   - Mot 0 : CAR (valeur du premier élément)
+   - Mot 1 : CDR (reste de la liste ou valeur)
+   
+   Utilise $GP (registre 28) comme heap pointer.
+   Retourne l'adresse de la cons cell dans $V0."
+  (let ((code '())
+        (reg-gp (get-reg :gp)))  ; $GP = registre 28 (heap pointer)
+    
+    ;; 1. Compiler et évaluer CAR
+    (setf code (append code (compile-expr car-expr env)))
+    ;; CAR value est dans $V0, sauvegarder sur la pile
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler et évaluer CDR
+    (setf code (append code (compile-expr cdr-expr env)))
+    ;; CDR value est dans $V0, sauvegarder dans $T0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Récupérer CAR de la pile dans $T1
+    (setf code (append code (list (list :LW *reg-t1* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. Allouer 2 mots sur le tas
+    ;; addr = $GP (sauvegarder dans $V0)
+    (setf code (append code (list (list :MOVE reg-gp *reg-v0*))))
+    
+    ;; 5. Avancer $GP de 2 mots (8 octets)
+    (setf code (append code (list (list :ADDI reg-gp 2 reg-gp))))
+    
+    ;; 6. Stocker CAR à [addr+0]
+    (setf code (append code (list (list :SW *reg-t1* *reg-v0* 0))))
+    
+    ;; 7. Stocker CDR à [addr+1]
+    (setf code (append code (list (list :SW *reg-t0* *reg-v0* 1))))
+    
+    ;; $V0 contient l'adresse de la cons cell
+    code))
+
+(defun compile-car (cons-expr env)
+  "Compile (car cons-cell)
+   Retourne le premier élément (CAR) de la cons cell.
+   Si cons-expr = 0 (NIL), retourne 0."
+  (let ((code '())
+        (label-null (gen-label env "CAR_NULL"))
+        (label-end (gen-label env "CAR_END")))
+    
+    ;; 1. Compiler et évaluer l'expression cons
+    (setf code (append code (compile-expr cons-expr env)))
+    ;; Adresse de la cons cell dans $V0
+    
+    ;; 2. Tester si NIL (0)
+    (setf code (append code (list (list :BEQ *reg-v0* *reg-zero* label-null))))
+    
+    ;; 3. Cas normal: charger CAR (mot 0)
+    (setf code (append code (list (list :LW *reg-v0* *reg-v0* 0))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; 4. Cas NIL: retourner 0
+    (setf code (append code (list (list :LABEL label-null))))
+    (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
+    
+    ;; 5. Fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-cdr (cons-expr env)
+  "Compile (cdr cons-cell)
+   Retourne le reste (CDR) de la cons cell.
+   Si cons-expr = 0 (NIL), retourne 0."
+  (let ((code '())
+        (label-null (gen-label env "CDR_NULL"))
+        (label-end (gen-label env "CDR_END")))
+    
+    ;; 1. Compiler et évaluer l'expression cons
+    (setf code (append code (compile-expr cons-expr env)))
+    ;; Adresse de la cons cell dans $V0
+    
+    ;; 2. Tester si NIL (0)
+    (setf code (append code (list (list :BEQ *reg-v0* *reg-zero* label-null))))
+    
+    ;; 3. Cas normal: charger CDR (mot 1)
+    (setf code (append code (list (list :LW *reg-v0* *reg-v0* 1))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; 4. Cas NIL: retourner 0
+    (setf code (append code (list (list :LABEL label-null))))
+    (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
+    
+    ;; 5. Fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+(defun compile-null (expr env)
+  "Compile (null expr)
+   Retourne 1 (vrai) si expr = 0 (NIL), sinon 0 (faux)."
+  (let ((code '())
+        (label-true (gen-label env "NULL_TRUE"))
+        (label-end (gen-label env "NULL_END")))
+    
+    ;; 1. Compiler et évaluer l'expression
+    (setf code (append code (compile-expr expr env)))
+    ;; Valeur dans $V0
+    
+    ;; 2. Si $V0 == 0, aller à label-true
+    (setf code (append code (list (list :BEQ *reg-v0* *reg-zero* label-true))))
+    
+    ;; 3. Cas faux: $V0 != 0, retourner 0
+    (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
+    (setf code (append code (list (list :J label-end))))
+    
+    ;; 4. Cas vrai: $V0 == 0, retourner 1
+    (setf code (append code (list (list :LABEL label-true))))
+    (setf code (append code (list (list :LI 1 *reg-v0*))))
+    
+    ;; 5. Fin
+    (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
 
 (defun compile-labels (definitions body env)
   "Compile (labels ((fn1 args1 body1) (fn2 args2 body2) ...) body)
@@ -2043,6 +2339,9 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:while
        (compile-while (second parsed) (third parsed) env))
       
+      (:dolist
+       (compile-dolist (second parsed) (third parsed) (fourth parsed) env))
+      
       (:progn
        (compile-progn (second parsed) env))
       
@@ -2054,6 +2353,25 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       (:dotimes
        (compile-dotimes (second parsed) (third parsed) env))
+      
+      (:incf
+       (compile-incf (second parsed) (third parsed) env))
+      
+      (:decf
+       (compile-decf (second parsed) (third parsed) env))
+      
+      ;; LIST OPERATIONS (PHASE 11 Sprint 2.1)
+      (:cons
+       (compile-cons (second parsed) (third parsed) env))
+      
+      (:car
+       (compile-car (second parsed) env))
+      
+      (:cdr
+       (compile-cdr (second parsed) env))
+      
+      (:null
+       (compile-null (second parsed) env))
       
       (:setq
        (compile-setq (second parsed) (third parsed) env))
@@ -2175,9 +2493,9 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     ;; Générer code d'initialisation si valeur fournie
     (when value
-      ;; La valeur arrive brute (non parsée) - la parser d'abord
-      (let* ((parsed-value (parse-lisp-expr value))
-             (init-code (compile-expr parsed-value env)))
+      ;; La valeur arrive brute (non parsée) - compile-expr va la parser
+      ;; BUG FIX PHASE 11: Ne pas parser deux fois! compile-expr parse déjà.
+      (let ((init-code (compile-expr value env)))
         ;; Résultat dans $v0, le stocker à l'adresse globale
         ;; Format: (SW src base offset) → stocker $v0 à ($zero + addr)
         (setf code (append init-code (list (list :SW *reg-v0* *reg-zero* addr))))))
