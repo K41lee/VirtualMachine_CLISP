@@ -1,0 +1,11 @@
+BENCHMARK MULTI-NIVEAUX : LISP / VM0 / VM1→VM2
+Date: 3974429538
+
+Configuration: 100 itérations
+
+Test                           | LISP natif | VM0        | VM1→VM2    | VM0/Nat  | VM1/Nat 
+-------------------------------+------------+------------+------------+----------+---------
+Arithmétique simple            |   0.000000 |   0.000027 |   0.000029 |    67.25x |    71.50x
+Liste CONS/CAR/CDR             |   0.000001 |   0.000156 |   0.000304 |   295.28x |   573.96x
+DOLIST somme                   |   0.000004 |   0.000111 |   0.000224 |    26.09x |    52.66x
+IF imbriqués                   |   0.000001 |   0.000067 |   0.001105 |    89.33x |  1472.80x

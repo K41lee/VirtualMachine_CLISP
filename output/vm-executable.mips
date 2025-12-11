@@ -1,0 +1,1849 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    VM1 - Machine Virtuelle Compilée                          
+#                     Générée automatiquement                                   
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Source: src/vm-compilable.lisp
+# Compilateur: src/compiler.lisp (Phase 11)
+# Générateur: generate-vm-executable.lisp
+#
+# Statistiques:
+#   Globales:   19 formes (110 instructions)
+#   Fonctions:  22 (1670 instructions)
+#   TOTAL:      1780 instructions
+# ═══════════════════════════════════════════════════════════════════════════════
+
+.data
+
+# Layout mémoire VM
+vm_memory:        .space 1048576    # 1MB RAM (adresses 0-1048575)
+
+# Variables d'état VM
+vm_state:         .word 0           # +STATE-READY+ = 0
+vm_instr_count:   .word 0           # Compteur instructions
+vm_verbose:       .word 0           # Mode verbeux (0 = off)
+heap_pointer:     .word 161         # +HEAP-START+ = 161
+
+# Constantes de layout
+# +REGISTERS-START+ = 1
+# +REGISTERS-SIZE+  = 160 (40 registres × 4 octets)
+# +HEAP-START+      = 161
+# +HEAP-LIMIT+      = heap_start + heap_size
+
+
+.text
+.globl main
+
+# Point d'entrée principal
+main:
+    # Initialisation des registres système
+    li $sp, 1047552        # Stack pointer: maxmem - 1024
+    li $gp, 161            # Heap pointer: +heap-start+
+    li $fp, 0              # Frame pointer
+
+    # Initialisation des variables globales
+    jal INIT_GLOBALS       # Appel obligatoire au démarrage
+
+    # Initialisation VM (optionnel selon utilisation)
+    # jal FN_INIT_MEMORY_LAYOUT
+    # jal FN_RESET_VM
+
+    # Point d'arrêt: programme minimal sans boucle d'exécution
+    # Pour exécuter du code, décommenter les appels ci-dessus
+    # ou ajouter vos propres appels de fonction ici
+
+    # Fin du programme
+    li $v0, 10             # Syscall exit
+    syscall
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# INITIALISATION VARIABLES GLOBALES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+INIT_GLOBALS:
+    li $V0, 1048576
+    sw $V0, 0($ZERO)
+    li $V0, 2000
+    sw $V0, 4($ZERO)
+    li $V0, 2000
+    sw $V0, 8($ZERO)
+    li $V0, 5000
+    sw $V0, 12($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    li $V0, $AT
+    move $A0, $V0
+    li $V0, $V0
+    move $A1, $V0
+    li $V0, $V1
+    move $A2, $V0
+    li $V0, $A0
+    move $A3, $V0
+    jal $ZERO
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    move $A0, $V0
+    jal QUOTE
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    sw $V0, 16($ZERO)
+    lw 0, $ZERO($V0)
+    addi $SP, $SP, -4
+    sw $S1, 0($SP)
+    move $S1, $V0
+    addi $A0, $S1, 2
+    move $V0, $GP
+    add $GP, $GP, $A0
+    addi $SP, $SP, -4
+    sw $S2, 4($SP)
+    move $S2, $V0
+    li $T0, 43146
+    sw $T0, 0($S2)
+    sw $S1, 1($S2)
+    li $V0, 0
+    move $T3, $V0
+    move $T0, $ZERO
+ARRAY_INIT_START_0:
+    slt $T1, $T0, $S1
+    beq $T1, $ZERO, ARRAY_INIT_END_1
+    addi $T2, $T0, 2
+    add $T4, $S2, $T2
+    sw $T3, 0($T4)
+    addi $T0, $T0, 1
+    j ARRAY_INIT_START_0
+ARRAY_INIT_END_1:
+    move $V0, $S2
+    lw 4, $SP($S2)
+    lw 0, $SP($S1)
+    addi $SP, $SP, 8
+    sw $V0, 20($ZERO)
+    li $V0, 42
+    addi $SP, $SP, -4
+    sw $S1, 0($SP)
+    move $S1, $V0
+    addi $A0, $S1, 2
+    move $V0, $GP
+    add $GP, $GP, $A0
+    addi $SP, $SP, -4
+    sw $S2, 4($SP)
+    move $S2, $V0
+    li $T0, 43146
+    sw $T0, 0($S2)
+    sw $S1, 1($S2)
+    li $V0, 0
+    move $T3, $V0
+    move $T0, $ZERO
+ARRAY_INIT_START_0:
+    slt $T1, $T0, $S1
+    beq $T1, $ZERO, ARRAY_INIT_END_1
+    addi $T2, $T0, 2
+    add $T4, $S2, $T2
+    sw $T3, 0($T4)
+    addi $T0, $T0, 1
+    j ARRAY_INIT_START_0
+ARRAY_INIT_END_1:
+    move $V0, $S2
+    lw 4, $SP($S2)
+    lw 0, $SP($S1)
+    addi $SP, $SP, 8
+    sw $V0, 24($ZERO)
+    li $V0, 0
+    sw $V0, 28($ZERO)
+    li $V0, 0
+    sw $V0, 32($ZERO)
+    li $V0, 161
+    sw $V0, 40($ZERO)
+    jr $ra
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FONCTIONS VM COMPILÉES (22 fonctions)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+FN_RESET-HEAP:
+RESET-HEAP:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 161
+    sw $V0, 40($ZERO)
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_VM-MALLOC:
+VM-MALLOC:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 40, $ZERO($V0)
+    sw $V0, 4($SP)
+    move $V0, $S0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 165
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $V0, $S3, $S2
+    beq $V0, $ZERO, WHEN_END_0
+    # Unknown instruction: (HALT)
+WHEN_END_0:
+    lw 40, $ZERO($V0)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 40, $ZERO($V0)
+    sw $V0, 4($SP)
+    move $V0, $S0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    sw $V0, 40($ZERO)
+    lw 0, $SP($V0)
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_REG-INDEX:
+REG-INDEX:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    move $V0, $S0
+    move $T0, $V0
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $ZERO
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_2
+    j CASE_NEXT_1
+CASE_MATCH_2:
+    li $V0, 0
+    j CASE_END_0
+CASE_NEXT_1:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $AT
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_4
+    j CASE_NEXT_3
+CASE_MATCH_4:
+    li $V0, 1
+    j CASE_END_0
+CASE_NEXT_3:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $V0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_6
+    j CASE_NEXT_5
+CASE_MATCH_6:
+    li $V0, 2
+    j CASE_END_0
+CASE_NEXT_5:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $V1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_8
+    j CASE_NEXT_7
+CASE_MATCH_8:
+    li $V0, 3
+    j CASE_END_0
+CASE_NEXT_7:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $A0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_10
+    j CASE_NEXT_9
+CASE_MATCH_10:
+    li $V0, 4
+    j CASE_END_0
+CASE_NEXT_9:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $A1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_12
+    j CASE_NEXT_11
+CASE_MATCH_12:
+    li $V0, 5
+    j CASE_END_0
+CASE_NEXT_11:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $A2
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_14
+    j CASE_NEXT_13
+CASE_MATCH_14:
+    li $V0, 6
+    j CASE_END_0
+CASE_NEXT_13:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $A3
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_16
+    j CASE_NEXT_15
+CASE_MATCH_16:
+    li $V0, 7
+    j CASE_END_0
+CASE_NEXT_15:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_18
+    j CASE_NEXT_17
+CASE_MATCH_18:
+    li $V0, 8
+    j CASE_END_0
+CASE_NEXT_17:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_20
+    j CASE_NEXT_19
+CASE_MATCH_20:
+    li $V0, 9
+    j CASE_END_0
+CASE_NEXT_19:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T2
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_22
+    j CASE_NEXT_21
+CASE_MATCH_22:
+    li $V0, 10
+    j CASE_END_0
+CASE_NEXT_21:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T3
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_24
+    j CASE_NEXT_23
+CASE_MATCH_24:
+    li $V0, 11
+    j CASE_END_0
+CASE_NEXT_23:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T4
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_26
+    j CASE_NEXT_25
+CASE_MATCH_26:
+    li $V0, 12
+    j CASE_END_0
+CASE_NEXT_25:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T5
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_28
+    j CASE_NEXT_27
+CASE_MATCH_28:
+    li $V0, 13
+    j CASE_END_0
+CASE_NEXT_27:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T6
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_30
+    j CASE_NEXT_29
+CASE_MATCH_30:
+    li $V0, 14
+    j CASE_END_0
+CASE_NEXT_29:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T7
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_32
+    j CASE_NEXT_31
+CASE_MATCH_32:
+    li $V0, 15
+    j CASE_END_0
+CASE_NEXT_31:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_34
+    j CASE_NEXT_33
+CASE_MATCH_34:
+    li $V0, 16
+    j CASE_END_0
+CASE_NEXT_33:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_36
+    j CASE_NEXT_35
+CASE_MATCH_36:
+    li $V0, 17
+    j CASE_END_0
+CASE_NEXT_35:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S2
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_38
+    j CASE_NEXT_37
+CASE_MATCH_38:
+    li $V0, 18
+    j CASE_END_0
+CASE_NEXT_37:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S3
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_40
+    j CASE_NEXT_39
+CASE_MATCH_40:
+    li $V0, 19
+    j CASE_END_0
+CASE_NEXT_39:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S4
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_42
+    j CASE_NEXT_41
+CASE_MATCH_42:
+    li $V0, 20
+    j CASE_END_0
+CASE_NEXT_41:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S5
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_44
+    j CASE_NEXT_43
+CASE_MATCH_44:
+    li $V0, 21
+    j CASE_END_0
+CASE_NEXT_43:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S6
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_46
+    j CASE_NEXT_45
+CASE_MATCH_46:
+    li $V0, 22
+    j CASE_END_0
+CASE_NEXT_45:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $S7
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_48
+    j CASE_NEXT_47
+CASE_MATCH_48:
+    li $V0, 23
+    j CASE_END_0
+CASE_NEXT_47:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T8
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_50
+    j CASE_NEXT_49
+CASE_MATCH_50:
+    li $V0, 24
+    j CASE_END_0
+CASE_NEXT_49:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $T9
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_52
+    j CASE_NEXT_51
+CASE_MATCH_52:
+    li $V0, 25
+    j CASE_END_0
+CASE_NEXT_51:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $K0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_54
+    j CASE_NEXT_53
+CASE_MATCH_54:
+    li $V0, 26
+    j CASE_END_0
+CASE_NEXT_53:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $K1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_56
+    j CASE_NEXT_55
+CASE_MATCH_56:
+    li $V0, 27
+    j CASE_END_0
+CASE_NEXT_55:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $GP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_58
+    j CASE_NEXT_57
+CASE_MATCH_58:
+    li $V0, 28
+    j CASE_END_0
+CASE_NEXT_57:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $SP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_60
+    j CASE_NEXT_59
+CASE_MATCH_60:
+    li $V0, 29
+    j CASE_END_0
+CASE_NEXT_59:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $FP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_62
+    j CASE_NEXT_61
+CASE_MATCH_62:
+    li $V0, 30
+    j CASE_END_0
+CASE_NEXT_61:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, $RA
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_64
+    j CASE_NEXT_63
+CASE_MATCH_64:
+    li $V0, 31
+    j CASE_END_0
+CASE_NEXT_63:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, PC
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_66
+    j CASE_NEXT_65
+CASE_MATCH_66:
+    li $V0, 32
+    j CASE_END_0
+CASE_NEXT_65:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, HI
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_68
+    j CASE_NEXT_67
+CASE_MATCH_68:
+    li $V0, 33
+    j CASE_END_0
+CASE_NEXT_67:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, LO
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_70
+    j CASE_NEXT_69
+CASE_MATCH_70:
+    li $V0, 34
+    j CASE_END_0
+CASE_NEXT_69:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, ZERO
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_72
+    j CASE_NEXT_71
+CASE_MATCH_72:
+    li $V0, 35
+    j CASE_END_0
+CASE_NEXT_71:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, AT
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_74
+    j CASE_NEXT_73
+CASE_MATCH_74:
+    li $V0, 36
+    j CASE_END_0
+CASE_NEXT_73:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, V0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_76
+    j CASE_NEXT_75
+CASE_MATCH_76:
+    li $V0, 37
+    j CASE_END_0
+CASE_NEXT_75:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, V1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_78
+    j CASE_NEXT_77
+CASE_MATCH_78:
+    li $V0, 38
+    j CASE_END_0
+CASE_NEXT_77:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, SP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_80
+    j CASE_NEXT_79
+CASE_MATCH_80:
+    li $V0, 39
+    j CASE_END_0
+CASE_NEXT_79:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, FP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_82
+    j CASE_NEXT_81
+CASE_MATCH_82:
+    li $V0, 40
+    j CASE_END_0
+CASE_NEXT_81:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, RA
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_84
+    j CASE_NEXT_83
+CASE_MATCH_84:
+    li $V0, 41
+    j CASE_END_0
+CASE_NEXT_83:
+    # Unknown instruction: (HALT)
+    j CASE_END_0
+CASE_END_0:
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_MAKE-NEW-VM:
+MAKE-NEW-VM:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 0
+    sw $V0, 36($ZERO)
+    li $V0, 0
+    sw $V0, 28($ZERO)
+    li $V0, 0
+    sw $V0, 32($ZERO)
+    lw 0, $ZERO($V0)
+    addi $SP, $SP, -4
+    sw $S1, 0($SP)
+    move $S1, $V0
+    addi $A0, $S1, 2
+    move $V0, $GP
+    add $GP, $GP, $A0
+    addi $SP, $SP, -4
+    sw $S2, 4($SP)
+    move $S2, $V0
+    li $T0, 43146
+    sw $T0, 0($S2)
+    sw $S1, 1($S2)
+    li $V0, 0
+    move $T3, $V0
+    move $T0, $ZERO
+ARRAY_INIT_START_0:
+    slt $T1, $T0, $S1
+    beq $T1, $ZERO, ARRAY_INIT_END_1
+    addi $T2, $T0, 2
+    add $T4, $S2, $T2
+    sw $T3, 0($T4)
+    addi $T0, $T0, 1
+    j ARRAY_INIT_START_0
+ARRAY_INIT_END_1:
+    move $V0, $S2
+    lw 4, $SP($S2)
+    lw 0, $SP($S1)
+    addi $SP, $SP, 8
+    sw $V0, 20($ZERO)
+    li $V0, 42
+    addi $SP, $SP, -4
+    sw $S1, 0($SP)
+    move $S1, $V0
+    addi $A0, $S1, 2
+    move $V0, $GP
+    add $GP, $GP, $A0
+    addi $SP, $SP, -4
+    sw $S2, 4($SP)
+    move $S2, $V0
+    li $T0, 43146
+    sw $T0, 0($S2)
+    sw $S1, 1($S2)
+    li $V0, 0
+    move $T3, $V0
+    move $T0, $ZERO
+ARRAY_INIT_START_2:
+    slt $T1, $T0, $S1
+    beq $T1, $ZERO, ARRAY_INIT_END_3
+    addi $T2, $T0, 2
+    add $T4, $S2, $T2
+    sw $T3, 0($T4)
+    addi $T0, $T0, 1
+    j ARRAY_INIT_START_2
+ARRAY_INIT_END_3:
+    move $V0, $S2
+    lw 4, $SP($S2)
+    lw 0, $SP($S1)
+    addi $SP, $SP, 8
+    sw $V0, 24($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal INIT-REGISTERS
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal INIT-MEMORY-LAYOUT
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_INIT-REGISTERS:
+INIT-REGISTERS:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+WHILE_START_0:
+    lw 0, $SP($V0)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 42
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $V0, $S2, $S3
+    beq $V0, $ZERO, WHILE_END_1
+    li $V0, 0
+    move $T0, $V0
+    lw 24, $ZERO($V0)
+    move $T1, $V0
+    lw 0, $SP($V0)
+    addi $T2, $V0, 2
+    add $T3, $T1, $T2
+    sw $T0, 0($T3)
+    move $V0, $T0
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    sw $V0, 0($SP)
+    j WHILE_START_0
+WHILE_END_1:
+    move $V0, $ZERO
+    addi $SP, $SP, 4
+    li $V0, 0
+    move $T2, $V0
+    li $V0, 0
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    li $V0, 29
+    move $T2, $V0
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $ZERO($V0)
+    sw $V0, 4($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 12, $ZERO($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    sub $V0, $T0, $V0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    sub $V0, $T0, $V0
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    li $V0, 30
+    move $T2, $V0
+    li $V0, 29
+    li $T0, 4
+    mul $V0, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    lw $V0, 0($T1)
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    li $V0, 28
+    move $T2, $V0
+    li $V0, 161
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    li $V0, 32
+    move $T2, $V0
+    li $V0, 0
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    li $V0, 31
+    move $T2, $V0
+    li $V0, 0
+    li $T0, 4
+    mul $T2, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    sw $V0, 0($T1)
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_INIT-MEMORY-LAYOUT:
+INIT-MEMORY-LAYOUT:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_RESET-VM:
+RESET-VM:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    lw 0, $ZERO($V0)
+    addi $SP, $SP, -4
+    sw $S1, 0($SP)
+    move $S1, $V0
+    addi $A0, $S1, 2
+    move $V0, $GP
+    add $GP, $GP, $A0
+    addi $SP, $SP, -4
+    sw $S2, 4($SP)
+    move $S2, $V0
+    li $T0, 43146
+    sw $T0, 0($S2)
+    sw $S1, 1($S2)
+    li $V0, 0
+    move $T3, $V0
+    move $T0, $ZERO
+ARRAY_INIT_START_0:
+    slt $T1, $T0, $S1
+    beq $T1, $ZERO, ARRAY_INIT_END_1
+    addi $T2, $T0, 2
+    add $T4, $S2, $T2
+    sw $T3, 0($T4)
+    addi $T0, $T0, 1
+    j ARRAY_INIT_START_0
+ARRAY_INIT_END_1:
+    move $V0, $S2
+    lw 4, $SP($S2)
+    lw 0, $SP($S1)
+    addi $SP, $SP, 8
+    sw $V0, 20($ZERO)
+    li $V0, 0
+    sw $V0, 28($ZERO)
+    li $V0, 0
+    sw $V0, 32($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal RESET-HEAP
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal INIT-REGISTERS
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    jal INIT-MEMORY-LAYOUT
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_MAP-OLD-REGISTER:
+MAP-OLD-REGISTER:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    move $V0, $S0
+    move $T0, $V0
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, R0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_2
+    j CASE_NEXT_1
+CASE_MATCH_2:
+    li $V0, 8
+    j CASE_END_0
+CASE_NEXT_1:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, R1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_4
+    j CASE_NEXT_3
+CASE_MATCH_4:
+    li $V0, 9
+    j CASE_END_0
+CASE_NEXT_3:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, R2
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_6
+    j CASE_NEXT_5
+CASE_MATCH_6:
+    li $V0, 10
+    j CASE_END_0
+CASE_NEXT_5:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, MEM
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_8
+    j CASE_NEXT_7
+CASE_MATCH_8:
+    li $V0, 11
+    j CASE_END_0
+CASE_NEXT_7:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, GT
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_10
+    j CASE_NEXT_9
+CASE_MATCH_10:
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    li $V0, 36
+    move $A0, $V0
+    lw 16, $ZERO($V0)
+    move $A1, $V0
+    jal NTH
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    j CASE_END_0
+CASE_NEXT_9:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, LT
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_12
+    j CASE_NEXT_11
+CASE_MATCH_12:
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    li $V0, 37
+    move $A0, $V0
+    lw 16, $ZERO($V0)
+    move $A1, $V0
+    jal NTH
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    j CASE_END_0
+CASE_NEXT_11:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, EQ
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_14
+    j CASE_NEXT_13
+CASE_MATCH_14:
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    li $V0, 38
+    move $A0, $V0
+    lw 16, $ZERO($V0)
+    move $A1, $V0
+    jal NTH
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    j CASE_END_0
+CASE_NEXT_13:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, PL
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_16
+    j CASE_NEXT_15
+CASE_MATCH_16:
+    li $V0, 32
+    j CASE_END_0
+CASE_NEXT_15:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, FP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_18
+    j CASE_NEXT_17
+CASE_MATCH_18:
+    li $V0, 30
+    j CASE_END_0
+CASE_NEXT_17:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, SP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_20
+    j CASE_NEXT_19
+CASE_MATCH_20:
+    li $V0, 29
+    j CASE_END_0
+CASE_NEXT_19:
+    addi $SP, $SP, -4
+    sw $T0, 0($SP)
+    li $V0, HP
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    sub $T2, $S2, $S3
+    beq $T2, $ZERO, CASE_MATCH_22
+    j CASE_NEXT_21
+CASE_MATCH_22:
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    li $V0, 28
+    move $A0, $V0
+    lw 16, $ZERO($V0)
+    move $A1, $V0
+    jal NTH
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    j CASE_END_0
+CASE_NEXT_21:
+    move $V0, $S0
+    j CASE_END_0
+CASE_END_0:
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_GET-REGISTER:
+GET-REGISTER:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    move $V0, $S0
+    move $A0, $V0
+    jal MAP-OLD-REGISTER
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal VARIABLE
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    li $T0, 0
+    slt $T1, $T0, $V0
+    li $T0, 38
+    slt $T2, $V0, $T0
+    # Unknown instruction: (AND $T1 $T2 $V0)
+    bne $V0, $ZERO, UNLESS_SKIP_0
+    # Unknown instruction: (HALT)
+    j UNLESS_END_1
+UNLESS_SKIP_0:
+    move $V0, $ZERO
+UNLESS_END_1:
+    lw 24, $ZERO($V0)
+    move $T0, $V0
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal REG-INDEX
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $T1, $V0, 2
+    add $T2, $T0, $T1
+    lw 0, $T2($V0)
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_SET-REGISTER:
+SET-REGISTER:
+    addi $SP, $SP, -12
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    sw $A1, 8($SP)
+    lw 8, $SP($S1)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    move $V0, $S0
+    move $A0, $V0
+    jal MAP-OLD-REGISTER
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal VARIABLE
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    li $T0, 0
+    slt $T1, $T0, $V0
+    li $T0, 38
+    slt $T2, $V0, $T0
+    # Unknown instruction: (AND $T1 $T2 $V0)
+    bne $V0, $ZERO, UNLESS_SKIP_0
+    # Unknown instruction: (HALT)
+    j UNLESS_END_1
+UNLESS_SKIP_0:
+    move $V0, $ZERO
+UNLESS_END_1:
+    move $V0, $S1
+    move $T0, $V0
+    lw 24, $ZERO($V0)
+    move $T1, $V0
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal REG-INDEX
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $T2, $V0, 2
+    add $T3, $T1, $T2
+    sw $T0, 0($T3)
+    move $V0, $T0
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 12
+    jr $RA
+FN_DUMP-REGISTERS:
+DUMP-REGISTERS:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_CHECK-MEMORY-BOUNDS:
+CHECK-MEMORY-BOUNDS:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    move $V0, $S0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    li $V0, 1
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $V0, $S2, $S3
+    bne $V0, $ZERO, OR_TRUE_1
+    move $V0, $S0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    lw 0, $ZERO($V0)
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $T2, $S2, $S3
+    li $T3, 1
+    sub $V0, $T3, $T2
+    bne $V0, $ZERO, OR_TRUE_1
+    li $V0, 0
+    j OR_END_2
+OR_TRUE_1:
+    li $V0, 1
+OR_END_2:
+    beq $V0, $ZERO, WHEN_END_0
+    # Unknown instruction: (HALT)
+WHEN_END_0:
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_MEM-READ:
+MEM-READ:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    move $V0, $S0
+    move $A0, $V0
+    jal CHECK-MEMORY-BOUNDS
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    lw 20, $ZERO($V0)
+    move $T0, $V0
+    move $V0, $S0
+    addi $T1, $V0, 2
+    add $T2, $T0, $T1
+    lw 0, $T2($V0)
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_MEM-WRITE:
+MEM-WRITE:
+    addi $SP, $SP, -12
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    sw $A1, 8($SP)
+    lw 8, $SP($S1)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    move $V0, $S0
+    move $A0, $V0
+    jal CHECK-MEMORY-BOUNDS
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    move $V0, $S1
+    move $T0, $V0
+    lw 20, $ZERO($V0)
+    move $T1, $V0
+    move $V0, $S0
+    addi $T2, $V0, 2
+    add $T3, $T1, $T2
+    sw $T0, 0($T3)
+    move $V0, $T0
+    lw 0, $SP($RA)
+    addi $SP, $SP, 12
+    jr $RA
+FN_ALLOC-MEMORY:
+ALLOC-MEMORY:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    lw $V0, 148($ZERO)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    move $V0, $S0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    lw $V0, 152($ZERO)
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $T2, $S2, $S3
+    li $T3, 1
+    sub $V0, $T3, $T2
+    beq $V0, $ZERO, WHEN_END_0
+    # Unknown instruction: (HALT)
+WHEN_END_0:
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    move $V0, $S0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    sw $V0, 148($ZERO)
+    lw 0, $SP($V0)
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_DUMP-MEMORY:
+DUMP-MEMORY:
+    addi $SP, $SP, -12
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    sw $A1, 8($SP)
+    lw 8, $SP($S1)
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 12
+    jr $RA
+FN_CALCULATE-CODE-START:
+CALCULATE-CODE-START:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $ZERO($V0)
+    sw $V0, 4($SP)
+    lw 12, $ZERO($V0)
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    sub $V0, $T0, $V0
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_PUSH-STACK:
+PUSH-STACK:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    lw $V0, 152($ZERO)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    lw 0, $SP($V0)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    li $V0, 161
+    sw $V0, 4($SP)
+    lw 4, $ZERO($V0)
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    move $S3, $V0
+    lw 0, $SP($S2)
+    addi $SP, $SP, 4
+    slt $T2, $S3, $S2
+    li $T3, 1
+    sub $V0, $T3, $T2
+    beq $V0, $ZERO, WHEN_END_0
+    # Unknown instruction: (HALT)
+WHEN_END_0:
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    sub $V0, $T0, $V0
+    sw $V0, 152($ZERO)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    move $V0, $S0
+    move $A1, $V0
+    jal MEM-WRITE
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_POP-STACK:
+POP-STACK:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    lw $V0, 152($ZERO)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    move $A0, $V0
+    jal MEM-READ
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    sw $V0, 152($ZERO)
+    lw 4, $SP($V0)
+    addi $SP, $SP, 4
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
+FN_PEEK-STACK:
+PEEK-STACK:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    lw $V0, 152($ZERO)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    lw 0, $SP($V0)
+    sw $V0, 4($SP)
+    addi $SP, $SP, -8
+    sw $S7, 0($SP)
+    move $V0, $S0
+    sw $V0, 4($SP)
+    li $V0, 1
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    lw 4, $SP($T0)
+    lw 0, $SP($S7)
+    addi $SP, $SP, 8
+    add $V0, $T0, $V0
+    move $A0, $V0
+    jal MEM-READ
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_DUMP-STACK:
+DUMP-STACK:
+    addi $SP, $SP, -8
+    sw $RA, 0($SP)
+    sw $A0, 4($SP)
+    lw 4, $SP($S0)
+    li $V0, 1
+    lw 0, $SP($RA)
+    addi $SP, $SP, 8
+    jr $RA
+FN_FETCH-INSTRUCTION:
+FETCH-INSTRUCTION:
+    addi $SP, $SP, -4
+    sw $RA, 0($SP)
+    li $V0, 32
+    li $T0, 4
+    mul $V0, $T0
+    mflo $T0
+    addi $T0, $T0, 36
+    add $T1, $ZERO, $T0
+    lw $V0, 0($T1)
+    addi $SP, $SP, -4
+    sw $V0, 0($SP)
+    addi $SP, $SP, -20
+    sw $S0, 0($SP)
+    sw $RA, 4($SP)
+    sw $S4, 8($SP)
+    sw $S5, 12($SP)
+    sw $S6, 16($SP)
+    lw 0, $SP($V0)
+    move $A0, $V0
+    jal MEM-READ
+    lw 4, $SP($RA)
+    lw 0, $SP($S0)
+    lw 8, $SP($S4)
+    lw 12, $SP($S5)
+    lw 16, $SP($S6)
+    addi $SP, $SP, 20
+    addi $SP, $SP, 4
+    lw 0, $SP($RA)
+    addi $SP, $SP, 4
+    jr $RA
