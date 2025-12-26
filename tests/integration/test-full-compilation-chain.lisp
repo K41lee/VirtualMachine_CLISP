@@ -42,51 +42,47 @@
 (format t "~%✅ VM et compilateur chargés avec succès~%~%")
 
 ;;; ============================================================================
-;;; ÉTAPE 2 : COMPILER LE CHARGEUR (TODO - PAS ENCORE COMPILABLE)
+;;; ÉTAPE 2 : COMPILER LE CHARGEUR
 ;;; ============================================================================
 
-#|  --- ÉTAPE COMMENTÉE : LE CHARGEUR N'EST PAS ENCORE COMPILABLE ---
 (format t "═══════════════════════════════════════════════════════════════════~%")
-(format t "ÉTAPE 2/8 : Compilation du chargeur (load-code)~%")
+(format t "ÉTAPE 2/5 : Compilation du chargeur (load-code)~%")
 (format t "═══════════════════════════════════════════════════════════════════~%")
 
 ;; Définition simplifiée de load-code pour compilation
-;; (La version complète dans loader.lisp utilise des constructions non compilables)
+;; Version sans set-register (retourne start-addr au lieu de modifier $PC)
 (defparameter *loader-code*
   '(defun simple-load-code (code-list start-addr)
      "Chargeur simplifié : charge une liste d'instructions à partir d'une adresse"
      (let ((addr start-addr)
-           (i 0))
-       (while (< i (length code-list))
+           (i 0)
+           (count (length code-list)))
+       (while (< i count)
          (let ((instr (nth i code-list)))
            (mem-write addr instr)
            (setq addr (+ addr 1))
            (setq i (+ i 1))))
-       (set-register (get-reg :pc) start-addr)
-       t)))
+       start-addr)))
 
 (format t "  → Compilation de simple-load-code...~%")
 (defparameter *loader-mips* (compile-lisp *loader-code*))
 (format t "  ✓ Chargeur compilé : ~A instructions MIPS~%~%" (length *loader-mips*))
-|#
 
 ;;; ============================================================================
-;;; ÉTAPE 3 : CHARGER LE CHARGEUR COMPILÉ DANS LA VM (TODO)
+;;; ÉTAPE 3 : CHARGER LE CHARGEUR COMPILÉ DANS LA VM
 ;;; ============================================================================
 
-#|  --- ÉTAPE COMMENTÉE : DÉPEND DE L'ÉTAPE 2 ---
 (format t "═══════════════════════════════════════════════════════════════════~%")
-(format t "ÉTAPE 3/8 : Chargement du chargeur compilé dans la VM~%")
+(format t "ÉTAPE 3/5 : Chargement du chargeur compilé dans la VM~%")
 (format t "═══════════════════════════════════════════════════════════════════~%")
 
-(format t "  → Création de la VM...~%")
-(defparameter *vm-test* (make-new-vm :verbose nil))
+(format t "  → Création de la VM pour le chargeur...~%")
+(defparameter *vm-loader* (make-new-vm :verbose nil))
 (format t "  ✓ VM créée~%")
 
-(format t "  → Chargement du loader MIPS...~%")
-(load-code *vm-test* *loader-mips* :verbose nil)
-(format t "  ✓ Chargeur chargé à l'adresse ~A~%~%" (calculate-code-start *vm-test*))
-|#
+(format t "  → Chargement du chargeur MIPS...~%")
+(load-code *vm-loader* *loader-mips* :verbose nil)
+(format t "  ✓ Chargeur chargé à l'adresse ~A~%~%" (calculate-code-start *vm-loader*))
 
 ;;; ============================================================================
 ;;; ÉTAPE 4 : COMPILER LE COMPILATEUR (TODO - PAS ENCORE COMPILABLE)

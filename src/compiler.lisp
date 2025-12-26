@@ -58,6 +58,18 @@
   (setf *global-data-offset* 0))
 
 ;;; ============================================================================
+;;; PRIMITIVES VM (PHASE BOOTSTRAP - OPTION B)
+;;; ============================================================================
+
+(defparameter *vm-primitives* 
+  '(mem-write mem-read set-register get-register get-reg)
+  "Liste des fonctions primitives de la VM qui nécessitent un traitement spécial")
+
+(defun vm-primitive-p (symbol)
+  "Vérifie si un symbole est une primitive VM"
+  (member symbol *vm-primitives*))
+
+;;; ============================================================================
 ;;; ENVIRONNEMENT DE COMPILATION
 ;;; ============================================================================
 
@@ -399,6 +411,22 @@ qui a défini la fonction, ou NIL si non trouvée."
               (list :null (first args))
               (error "NULL requiert exactement 1 argument: ~A" expr)))
          
+         ;; LENGTH (longueur de liste - PHASE BOOTSTRAP)
+         (length
+          ;; Syntaxe: (length list)
+          ;; Retourne le nombre d'éléments dans la liste
+          (if (= (length args) 1)
+              (list :length (first args))
+              (error "LENGTH requiert exactement 1 argument: ~A" expr)))
+         
+         ;; NTH (accès indexé - PHASE BOOTSTRAP)
+         (nth
+          ;; Syntaxe: (nth index list)
+          ;; Retourne le n-ième élément (0-indexé)
+          (if (= (length args) 2)
+              (list :nth (first args) (second args))
+              (error "NTH requiert exactement 2 arguments (index list): ~A" expr)))
+         
          ;; DOLIST (itération sur liste - PHASE 11 Sprint 2.2)
          (dolist
           ;; Syntaxe: (dolist (var list-expr) body...)
@@ -479,9 +507,15 @@ qui a défini la fonction, ou NIL si non trouvée."
          
          ;; Appel de fonction
          (t
-          (if (symbolp op)
-              (list :call op args)
-              (error "Expression invalide: ~A" expr))))))
+          (cond
+            ;; Vérifier si c'est une primitive VM
+            ((and (symbolp op) (vm-primitive-p op))
+             (list :vm-primitive op args))
+            ;; Sinon, appel de fonction standard
+            ((symbolp op)
+             (list :call op args))
+            (t
+             (error "Expression invalide: ~A" expr)))))))
     
     (t (error "Expression LISP non reconnue: ~A" expr))))
 
@@ -1994,6 +2028,220 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     code))
 
+;;; ============================================================================
+;;; COMPILATION - PRIMITIVES VM (PHASE BOOTSTRAP - OPTION B)
+;;; ============================================================================
+
+(defun compile-vm-primitive (name args env)
+  "Compile un appel à une primitive VM
+   
+   Primitives supportées:
+   - mem-write : Écriture en mémoire VM
+   - mem-read  : Lecture en mémoire VM
+   - get-reg   : Récupération d'un numéro de registre
+   - set-register : Modification d'un registre (non supporté en compilation)"
+  (case name
+    (mem-write (compile-mem-write-prim args env))
+    (mem-read (compile-mem-read-prim args env))
+    (get-reg (compile-get-reg-prim args env))
+    (set-register (compile-set-register-prim args env))
+    (get-register (compile-get-register-prim args env))
+    (t (error "Primitive VM inconnue: ~A" name))))
+
+(defun compile-mem-write-prim (args env)
+  "Compile (mem-write addr value) → SW (Store Word)
+   
+   Génère: SW value, 0(addr)
+   
+   Note: Suppose que 'value' est un entier ou une valeur simple.
+   Pour des structures complexes, il faudrait un encodeur."
+  (let ((addr-expr (first args))
+        (value-expr (second args))
+        (code '()))
+    
+    ;; 1. Compiler adresse → $V0
+    (setf code (append code (compile-expr addr-expr env)))
+    ;; Sauvegarder adresse dans $T0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 2. Compiler valeur → $V0
+    (setf code (append code (compile-expr value-expr env)))
+    
+    ;; 3. SW $V0, 0($T0) : mémoire[$T0] ← $V0
+    (setf code (append code (list (list :SW *reg-v0* *reg-t0* 0))))
+    
+    code))
+
+(defun compile-mem-read-prim (args env)
+  "Compile (mem-read addr) → LW (Load Word)
+   
+   Génère: LW $V0, 0(addr)"
+  (let ((addr-expr (first args))
+        (code '()))
+    
+    ;; 1. Compiler adresse → $V0
+    (setf code (append code (compile-expr addr-expr env)))
+    ;; Sauvegarder dans $T0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 2. LW $V0, 0($T0) : $V0 ← mémoire[$T0]
+    (setf code (append code (list (list :LW *reg-v0* *reg-t0* 0))))
+    
+    code))
+
+(defun compile-get-reg-prim (args env)
+  "Compile (get-reg :pc) → retourne le numéro de registre
+   
+   Pour l'instant, retourne une constante symbolique.
+   Dans un vrai système, il faudrait mapper les keywords vers des numéros.
+   
+   Note: Cette primitive est utilisée avec set-register, mais en compilation
+   MIPS, l'accès direct aux registres VM n'a pas de sens.
+   On retourne 0 pour l'instant comme placeholder."
+  (let ((reg-keyword (first args)))
+    ;; Simplification: retourner 0
+    ;; Dans une implémentation complète, il faudrait:
+    ;; - Mapper :pc → numéro de registre PC (ex: 32)
+    ;; - Ou générer un code qui accède au tableau de registres
+    (list (list :LI 0 *reg-v0*))))
+
+(defun compile-set-register-prim (args env)
+  "Compile (set-register reg-id value)
+   
+   PROBLÈME: Cette primitive modifie l'état des registres de la VM,
+   ce qui n'a pas de sens dans du code compilé MIPS.
+   
+   Solution temporaire: Erreur explicite pour forcer refactoring du code source."
+  (error "set-register ne peut pas être compilé en MIPS.~%~
+          Suggestion: Modifier le code source pour éviter set-register,~%~
+          ou utiliser des variables locales à la place."))
+
+(defun compile-get-register-prim (args env)
+  "Compile (get-register reg-id)
+   
+   Même problème que set-register."
+  (error "get-register ne peut pas être compilé en MIPS.~%~
+          Suggestion: Utiliser des variables locales."))
+
+;;; ============================================================================
+;;; COMPILATION - LENGTH (PHASE BOOTSTRAP)
+;;; ============================================================================
+
+(defun compile-length (list-expr env)
+  "Compile (length list) - compte les éléments d'une liste
+   
+   Algorithme:
+   1. Évaluer list-expr → $V0 (pointeur liste)
+   2. Initialiser compteur à 0
+   3. Boucle:
+      - Si liste = NIL (0), sortir
+      - Incrémenter compteur
+      - Avancer au CDR (liste + 1 mot)
+   4. Retourner compteur dans $V0"
+  (let ((code '())
+        (loop-label (gen-label env "LENGTH_LOOP"))
+        (end-label (gen-label env "LENGTH_END")))
+    
+    ;; 1. Compiler l'expression liste → $V0
+    (setf code (append code (compile-expr list-expr env)))
+    
+    ;; 2. Sauvegarder pointeur liste dans $T0, initialiser compteur à 0 dans $V0
+    (setf code (append code
+      (list
+        (list :MOVE *reg-v0* *reg-t0*)    ; Liste dans $T0
+        (list :LI 0 *reg-v0*))))          ; Compteur = 0 dans $V0
+    
+    ;; 3. Boucle de comptage
+    (setf code (append code (list (list :LABEL loop-label))))
+    
+    ;; Si liste = NIL (0), sortir
+    (setf code (append code (list (list :BEQ *reg-t0* *reg-zero* end-label))))
+    
+    ;; Incrémenter compteur
+    (setf code (append code (list (list :ADDI *reg-v0* 1 *reg-v0*))))
+    
+    ;; Avancer au CDR : charger le mot à [liste+1]
+    (setf code (append code
+      (list
+        (list :LW *reg-t0* *reg-t0* 1))))  ; CDR = mot à offset 1
+    
+    ;; Continuer la boucle
+    (setf code (append code (list (list :J loop-label))))
+    
+    ;; 4. Fin - compteur dans $V0
+    (setf code (append code (list (list :LABEL end-label))))
+    
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - NTH (PHASE BOOTSTRAP)
+;;; ============================================================================
+
+(defun compile-nth (index-expr list-expr env)
+  "Compile (nth n list) - retourne le n-ième élément d'une liste (0-indexé)
+   
+   Algorithme:
+   1. Évaluer index → $V0, sauvegarder sur pile
+   2. Évaluer list → $V0, sauvegarder dans $T0
+   3. Récupérer index de la pile dans $T1
+   4. Boucle:
+      - Si liste = NIL, erreur (retourner 0)
+      - Si index = 0, retourner CAR de la cellule courante
+      - Décrémenter index
+      - Avancer au CDR
+   5. Retourner CAR dans $V0"
+  (let ((code '())
+        (loop-label (gen-label env "NTH_LOOP"))
+        (end-label (gen-label env "NTH_END"))
+        (error-label (gen-label env "NTH_ERROR")))
+    
+    ;; 1. Compiler index → $V0, puis sauvegarder sur la pile
+    (setf code (append code (compile-expr index-expr env)))
+    (setf code (append code 
+      (list 
+        (list :ADDI *reg-sp* -4 *reg-sp*)
+        (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler liste → $V0, puis sauvegarder dans $T0
+    (setf code (append code (compile-expr list-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Récupérer index de la pile dans $T1
+    (setf code (append code
+      (list
+        (list :LW *reg-t1* *reg-sp* 0)
+        (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. Boucle pour trouver le n-ième élément
+    (setf code (append code (list (list :LABEL loop-label))))
+    
+    ;; Si liste = NIL avant d'atteindre l'index, erreur (retourner 0)
+    (setf code (append code (list (list :BEQ *reg-t0* *reg-zero* error-label))))
+    
+    ;; Si index = 0, on a trouvé l'élément
+    (setf code (append code (list (list :BEQ *reg-t1* *reg-zero* end-label))))
+    
+    ;; Décrémenter index
+    (setf code (append code (list (list :ADDI *reg-t1* -1 *reg-t1*))))
+    
+    ;; Avancer au CDR : charger le mot à [liste+1]
+    (setf code (append code (list (list :LW *reg-t0* *reg-t0* 1))))
+    
+    ;; Continuer
+    (setf code (append code (list (list :J loop-label))))
+    
+    ;; 5. Fin - récupérer CAR de la cellule courante
+    (setf code (append code
+      (list
+        (list :LABEL end-label)
+        (list :LW *reg-v0* *reg-t0* 0)    ; CAR = mot à offset 0
+        (list :J error-label)             ; Sauter label erreur
+        (list :LABEL error-label))))
+    
+    ;; Si erreur (liste trop courte), $V0 contient déjà 0 ou valeur CAR
+    
+    code))
+
 (defun compile-labels (definitions body env)
   "Compile (labels ((fn1 args1 body1) (fn2 args2 body2) ...) body)
    Définit des fonctions locales avec portée lexicale et closures"
@@ -2372,6 +2620,15 @@ qui a défini la fonction, ou NIL si non trouvée."
       
       (:null
        (compile-null (second parsed) env))
+      
+      (:length
+       (compile-length (second parsed) env))
+      
+      (:nth
+       (compile-nth (second parsed) (third parsed) env))
+      
+      (:vm-primitive
+       (compile-vm-primitive (second parsed) (third parsed) env))
       
       (:setq
        (compile-setq (second parsed) (third parsed) env))
