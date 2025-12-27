@@ -66,7 +66,7 @@
   (set-register vm (get-reg :zero) 0)                         ; $zero est toujours 0
   (set-register vm (get-reg :sp) (- *maxmem* *code-size* 1))  ; Stack pointer
   (set-register vm (get-reg :fp) (get-register vm (get-reg :sp)))      ; Frame pointer
-  (set-register vm (nth 28 *register-names*) +heap-start+)                ; Global pointer (pour le tas)
+  (set-register vm (get-reg :gp) +heap-start+)                ; Global pointer (pour le tas)
   (set-register vm (get-reg :pc) 0)                           ; Program counter
   (set-register vm (get-reg :ra) 0))                          ; Return address
 

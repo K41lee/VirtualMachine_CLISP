@@ -38,6 +38,29 @@
     (nreverse resolved-code)))
 
 ;;; ============================================================================
+;;; CONVERSION KEYWORDS → SYMBOLES
+;;; ============================================================================
+
+(defun keyword-to-symbol (kw)
+  "Convertit un keyword en symbole (nécessaire pour compatibilité VM)
+   :ADDI → ADDI, :$SP → $SP, etc."
+  (if (keywordp kw)
+      (intern (symbol-name kw))
+      kw))
+
+(defun normalize-instruction (instr)
+  "Convertit tous les keywords d'une instruction en symboles"
+  (cond
+    ((null instr) nil)
+    ((keywordp instr) (keyword-to-symbol instr))
+    ((listp instr) (mapcar #'normalize-instruction instr))
+    (t instr)))
+
+(defun normalize-code (asm-code)
+  "Normalise tout le code assembleur (keywords → symboles)"
+  (mapcar #'normalize-instruction asm-code))
+
+;;; ============================================================================
 ;;; PARSING ET VALIDATION
 ;;; ============================================================================
 

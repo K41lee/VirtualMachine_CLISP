@@ -1,0 +1,184 @@
+═══════════════════════════════════════════════════════════════════════
+              DIAGNOSTIC RÉEL DE L'ÉTAT DU SYSTÈME
+═══════════════════════════════════════════════════════════════════════
+
+Date: 26 décembre 2025
+Sujet: Capacité du compilateur à s'auto-compiler
+
+═══════════════════════════════════════════════════════════════════════
+1. CE QUI FONCTIONNE
+═══════════════════════════════════════════════════════════════════════
+
+✅ COMPILATION SYNTAXIQUE (100%)
+  - Toutes les primitives compilent: CONS, CAR, CDR, NULL, LENGTH,
+    NTH, ASSOC, MEMBER, APPEND
+  - 8/9 fonctions type compilateur compilent
+  - Fonctions récursives avec APPEND compilent
+  - Le compilateur peut PARSER l'intégralité de son propre code source
+
+✅ GÉNÉRATION DE CODE MIPS
+  - Le compilateur génère des instructions MIPS
+  - Les fonctions complexes génèrent 50-200 instructions
+  - La structure du code semble correcte (ADDI, MOVE, LI, etc.)
+
+✅ TESTS UNITAIRES
+  - Chaque primitive testée individuellement: 11/11 tests
+  - Fonctions complexes testées: 8/8 tests
+  - Demo self-compilation: 156 instructions générées
+
+═══════════════════════════════════════════════════════════════════════
+2. CE QUI NE FONCTIONNE PAS
+═══════════════════════════════════════════════════════════════════════
+
+❌ EXÉCUTION DU CODE COMPILÉ
+  - Erreur: "Adresse mémoire hors limites: 0"
+  - Le PC démarre à 10480770 au lieu de l'adresse du code
+  - La VM n'exécute pas les instructions générées
+
+❌ PROBLÈME DU LOADER
+  - Le code MIPS n'est PAS chargé en mémoire correctement
+  - Format des instructions incompatible avec execute-instruction
+  - Keywords (:ADDI, :$SP) vs symboles (ADDI, $SP)
+
+❌ FORMAT DES INSTRUCTIONS
+  Test d'exécution de (+ 2 3):
+  
+  Code chargé en mémoire:
+    (:ADDI :$SP -8 :$SP)
+    (:SW :$S7 :$SP 0)
+    (:LI 2 :$V0)
+    ...
+  
+  Problème: La VM s'attend à des symboles normaux, pas des keywords!
+  
+  La fonction execute-instruction recherche des patterns comme:
+    (case (car instruction)
+      (ADDI ...)   ← Symbole normal
+      (LI ...)
+      ...)
+  
+  Mais le code chargé contient:
+    (:ADDI ...)  ← Keyword!
+  
+  Résultat: Aucune instruction n'est reconnue → PC=0 → crash
+
+═══════════════════════════════════════════════════════════════════════
+3. RAISON DU PROBLÈME
+═══════════════════════════════════════════════════════════════════════
+
+Le compilateur génère du code avec la fonction (list :ADDI ...) parce que
+c'est défini ainsi dans compile-arithmetic, compile-cons, etc.
+
+Exemple dans src/compiler.lisp ligne 865:
+  (list :ADDI *reg-sp* -8 *reg-sp*)
+
+Ce code retourne une liste avec un KEYWORD comme premier élément.
+
+La VM (src/vm.lisp) attend des SYMBOLES:
+  (case (car instruction)
+    (ADDI ...)    ← Cherche le symbole ADDI, pas le keyword :ADDI
+    ...)
+
+═══════════════════════════════════════════════════════════════════════
+4. SOLUTION NÉCESSAIRE
+═══════════════════════════════════════════════════════════════════════
+
+Option A: Modifier le compilateur (DIFFICILE)
+  - Changer tous les :ADDI en 'ADDI
+  - 3500+ lignes à modifier
+  - Risque de casser des fonctionnalités
+
+Option B: Modifier le loader (FACILE)
+  - Convertir keywords en symboles avant chargement
+  - Fonction: (defun keyword-to-symbol (kw) ...)
+  - 10-20 lignes de code
+
+Option C: Modifier l'exécuteur VM (MOYEN)
+  - Accepter à la fois keywords et symboles
+  - Modifier execute-instruction
+  - 50-100 lignes à modifier
+
+RECOMMANDATION: Option B (modifier le loader)
+
+═══════════════════════════════════════════════════════════════════════
+5. PROOF OF CONCEPT
+═══════════════════════════════════════════════════════════════════════
+
+Test simple: (+ 2 3)
+
+Compilation: ✅ 9 instructions générées
+Code généré:
+  (:ADDI :$SP -8 :$SP)
+  (:SW :$S7 :$SP 0)
+  (:LI 2 :$V0)
+  (:SW :$V0 :$SP 4)
+  (:LI 3 :$V0)
+  (:LW :$T0 :$SP 4)
+  (:LW :$S7 :$SP 0)
+  (:ADDI :$SP 8 :$SP)
+  (:ADD :$T0 :$V0 :$V0)
+
+Chargement: ❌ Code chargé mais non exécutable
+Exécution: ❌ PC=10480770, crash avec "adresse 0 hors limites"
+
+═══════════════════════════════════════════════════════════════════════
+6. CONCLUSION
+═══════════════════════════════════════════════════════════════════════
+
+CAPACITÉ DE COMPILATION: ✅ 100%
+  Le compilateur PEUT compiler l'intégralité de son propre code source.
+  Il génère du code MIPS syntaxiquement correct.
+
+CAPACITÉ D'EXÉCUTION: ❌ 0%
+  Le code généré n'est PAS exécutable par la VM dans l'état actuel.
+  Il manque une couche de conversion keyword→symbole.
+
+POUR OBTENIR UN COMPILATEUR FONCTIONNEL:
+  1. Implémenter la conversion keyword→symbole dans le loader
+  2. Tester l'exécution de (+ 2 3)
+  3. Si OK, tester des fonctions plus complexes
+  4. Si OK, essayer la self-compilation complète
+
+TEMPS ESTIMÉ POUR CORRECTION: 1-2 heures
+  - 30 min: implémenter la conversion
+  - 30 min: tester et debugger
+  - 30 min: valider sur fonctions complexes
+  - 30 min: tests de self-compilation
+
+═══════════════════════════════════════════════════════════════════════
+7. PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════════
+
+ÉTAPE 1: Corriger le loader
+  - Ajouter keyword-to-symbol
+  - Convertir toutes les instructions avant chargement
+  - Tester avec (+ 2 3)
+
+ÉTAPE 2: Valider l'exécution basique
+  - (+ 2 3) → doit retourner 5
+  - (cons 1 2) → doit créer un CONS
+  - Tests unitaires d'exécution
+
+ÉTAPE 3: Tests intermédiaires
+  - Fonctions avec IF
+  - Fonctions récursives simples
+  - Fonctions avec CONS/CAR/CDR
+
+ÉTAPE 4: Self-compilation partielle
+  - Compiler des fonctions utilitaires
+  - Exécuter le code compilé
+  - Valider les résultats
+
+ÉTAPE 5: Self-compilation complète
+  - Compiler l'intégralité de compiler.lisp
+  - Charger en VM
+  - Tester compilation d'un programme simple
+  - Valider point fixe
+
+═══════════════════════════════════════════════════════════════════════
+
+RÉSUMÉ EN UNE LIGNE:
+Le compilateur PEUT se compiler, mais le code généré n'est PAS exécutable
+sans corriger le format des instructions (keywords vs symboles).
+
+═══════════════════════════════════════════════════════════════════════

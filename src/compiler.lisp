@@ -427,6 +427,30 @@ qui a défini la fonction, ou NIL si non trouvée."
               (list :nth (first args) (second args))
               (error "NTH requiert exactement 2 arguments (index list): ~A" expr)))
          
+         ;; ASSOC (recherche dans alist - PHASE BOOTSTRAP COMPILER)
+         (assoc
+          ;; Syntaxe: (assoc key alist)
+          ;; Retourne (key . value) ou NIL
+          (if (= (length args) 2)
+              (list :assoc (first args) (second args))
+              (error "ASSOC requiert exactement 2 arguments (key alist): ~A" expr)))
+         
+         ;; MEMBER (test d'appartenance - PHASE BOOTSTRAP COMPILER)
+         (member
+          ;; Syntaxe: (member item list)
+          ;; Retourne sous-liste ou NIL
+          (if (= (length args) 2)
+              (list :member (first args) (second args))
+              (error "MEMBER requiert exactement 2 arguments (item list): ~A" expr)))
+         
+         ;; APPEND (concaténation de listes - PHASE BOOTSTRAP COMPILER)
+         (append
+          ;; Syntaxe: (append list1 list2)
+          ;; Retourne nouvelle liste concaténée
+          (if (= (length args) 2)
+              (list :append (first args) (second args))
+              (error "APPEND requiert exactement 2 arguments (list1 list2): ~A" expr)))
+         
          ;; DOLIST (itération sur liste - PHASE 11 Sprint 2.2)
          (dolist
           ;; Syntaxe: (dolist (var list-expr) body...)
@@ -1909,7 +1933,7 @@ qui a défini la fonction, ou NIL si non trouvée."
    - Mot 0 : CAR (valeur du premier élément)
    - Mot 1 : CDR (reste de la liste ou valeur)
    
-   Utilise $GP (registre 28) comme heap pointer.
+   Utilise $GP (registre 28) comme heap pointer (initialisé à +heap-start+).
    Retourne l'adresse de la cons cell dans $V0."
   (let ((code '())
         (reg-gp (get-reg :gp)))  ; $GP = registre 28 (heap pointer)
@@ -1923,7 +1947,7 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; 2. Compiler et évaluer CDR
     (setf code (append code (compile-expr cdr-expr env)))
     ;; CDR value est dans $V0, sauvegarder dans $T0
-    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    (setf code (append code (list (list :MOVE *reg-t0* *reg-v0*))))
     
     ;; 3. Récupérer CAR de la pile dans $T1
     (setf code (append code (list (list :LW *reg-t1* *reg-sp* 0))))
@@ -1933,7 +1957,8 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; addr = $GP (sauvegarder dans $V0)
     (setf code (append code (list (list :MOVE reg-gp *reg-v0*))))
     
-    ;; 5. Avancer $GP de 2 mots (8 octets)
+    ;; 5. Avancer $GP de 2 mots (taille CONS)
+    ;;    Format ADDI: (ADDI src immediate dest) -> dest = src + imm
     (setf code (append code (list (list :ADDI reg-gp 2 reg-gp))))
     
     ;; 6. Stocker CAR à [addr+0]
@@ -2025,6 +2050,295 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     ;; 5. Fin
     (setf code (append code (list (list :LABEL label-end))))
+    
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - ASSOC (PHASE BOOTSTRAP - COMPILER)
+;;; ============================================================================
+
+(defun compile-assoc (key-expr alist-expr env)
+  "Compile (assoc key alist) - recherche dans une liste associative
+   
+   Retourne la première paire (key . value) où key correspond,
+   ou NIL si non trouvé.
+   
+   Algorithme:
+   1. Évaluer key → $T1
+   2. Évaluer alist → $T0
+   3. Boucle:
+      - Si alist = NIL, retourner NIL
+      - Charger CAR de la liste (première paire)
+      - Charger CAR de la paire (la clé)
+      - Comparer avec key recherchée
+      - Si égal, retourner la paire
+      - Sinon, avancer au CDR et continuer"
+  (let ((code '())
+        (loop-label (gen-label env "ASSOC_LOOP"))
+        (found-label (gen-label env "ASSOC_FOUND"))
+        (not-found-label (gen-label env "ASSOC_NOT_FOUND"))
+        (end-label (gen-label env "ASSOC_END")))
+    
+    ;; 1. Compiler key → $V0, sauvegarder sur pile
+    (setf code (append code (compile-expr key-expr env)))
+    (setf code (append code 
+      (list 
+        (list :ADDI *reg-sp* -4 *reg-sp*)
+        (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler alist → $V0, sauvegarder dans $T0
+    (setf code (append code (compile-expr alist-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Récupérer key de la pile dans $T1
+    (setf code (append code
+      (list
+        (list :LW *reg-t1* *reg-sp* 0)
+        (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. Boucle de recherche
+    (setf code (append code (list (list :LABEL loop-label))))
+    
+    ;; Si alist = NIL, non trouvé
+    (setf code (append code (list (list :BEQ *reg-t0* *reg-zero* not-found-label))))
+    
+    ;; Charger CAR de alist (première paire) dans $T2
+    (setf code (append code (list (list :LW *reg-t2* *reg-t0* 0))))
+    
+    ;; Si la paire est NIL (liste mal formée), continuer
+    (setf code (append code (list (list :BEQ *reg-t2* *reg-zero* loop-label))))
+    
+    ;; Charger CAR de la paire (la clé) dans $T3
+    (setf code (append code (list (list :LW *reg-t3* *reg-t2* 0))))
+    
+    ;; Comparer clé de la paire avec clé recherchée
+    (setf code (append code 
+      (list
+        (list :SUB *reg-t3* *reg-t1* *reg-t4*)  ; T4 = clé_paire - clé_recherchée
+        (list :BEQ *reg-t4* *reg-zero* found-label))))  ; Si égal (diff=0), trouvé!
+    
+    ;; Pas égal, avancer au CDR de alist
+    (setf code (append code (list (list :LW *reg-t0* *reg-t0* 1))))
+    (setf code (append code (list (list :J loop-label))))
+    
+    ;; 5. Trouvé - retourner la paire dans $V0
+    (setf code (append code
+      (list
+        (list :LABEL found-label)
+        (list :MOVE *reg-t2* *reg-v0*)  ; Paire dans $V0
+        (list :J end-label))))
+    
+    ;; 6. Non trouvé - retourner NIL (0)
+    (setf code (append code
+      (list
+        (list :LABEL not-found-label)
+        (list :MOVE *reg-zero* *reg-v0*)  ; NIL dans $V0
+        (list :LABEL end-label))))
+    
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - MEMBER (PHASE BOOTSTRAP - COMPILER)
+;;; ============================================================================
+
+(defun compile-member (item-expr list-expr env)
+  "Compile (member item list) - test d'appartenance
+   
+   Retourne la sous-liste commençant par item si trouvé,
+   ou NIL si non trouvé.
+   
+   Algorithme:
+   1. Évaluer item → $T1
+   2. Évaluer list → $T0
+   3. Boucle:
+      - Si list = NIL, retourner NIL
+      - Charger CAR de la liste
+      - Comparer avec item
+      - Si égal, retourner la liste courante
+      - Sinon, avancer au CDR et continuer"
+  (let ((code '())
+        (loop-label (gen-label env "MEMBER_LOOP"))
+        (found-label (gen-label env "MEMBER_FOUND"))
+        (not-found-label (gen-label env "MEMBER_NOT_FOUND"))
+        (end-label (gen-label env "MEMBER_END")))
+    
+    ;; 1. Compiler item → $V0, sauvegarder sur pile
+    (setf code (append code (compile-expr item-expr env)))
+    (setf code (append code 
+      (list 
+        (list :ADDI *reg-sp* -4 *reg-sp*)
+        (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler list → $V0, sauvegarder dans $T0
+    (setf code (append code (compile-expr list-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Récupérer item de la pile dans $T1
+    (setf code (append code
+      (list
+        (list :LW *reg-t1* *reg-sp* 0)
+        (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. Boucle de recherche
+    (setf code (append code (list (list :LABEL loop-label))))
+    
+    ;; Si list = NIL, non trouvé
+    (setf code (append code (list (list :BEQ *reg-t0* *reg-zero* not-found-label))))
+    
+    ;; Charger CAR de list dans $T2
+    (setf code (append code (list (list :LW *reg-t2* *reg-t0* 0))))
+    
+    ;; Comparer CAR avec item
+    (setf code (append code 
+      (list
+        (list :SUB *reg-t2* *reg-t1* *reg-t3*)  ; T3 = CAR - item
+        (list :BEQ *reg-t3* *reg-zero* found-label))))  ; Si égal, trouvé!
+    
+    ;; Pas égal, avancer au CDR
+    (setf code (append code (list (list :LW *reg-t0* *reg-t0* 1))))
+    (setf code (append code (list (list :J loop-label))))
+    
+    ;; 5. Trouvé - retourner la liste courante dans $V0
+    (setf code (append code
+      (list
+        (list :LABEL found-label)
+        (list :MOVE *reg-t0* *reg-v0*)  ; Liste courante dans $V0
+        (list :J end-label))))
+    
+    ;; 6. Non trouvé - retourner NIL (0)
+    (setf code (append code
+      (list
+        (list :LABEL not-found-label)
+        (list :MOVE *reg-zero* *reg-v0*)
+        (list :LABEL end-label))))
+    
+    code))
+
+;;; ============================================================================
+;;; APPEND - Concaténation de listes
+;;; ============================================================================
+
+(defun compile-append (list1-expr list2-expr env)
+  "Compile (append list1 list2) - concatène deux listes.
+   Algorithme :
+   1. Si list1 est NIL, retourner list2
+   2. Sinon, copier list1 élément par élément
+   3. Attacher list2 à la fin de la copie
+   4. Retourner la première CONS copiée"
+  (let ((loop-label (gen-label env "APPEND_LOOP"))
+        (end-loop-label (gen-label env "APPEND_END_LOOP"))
+        (first-cons-label (gen-label env "APPEND_FIRST"))
+        (not-first-label (gen-label env "APPEND_NOT_FIRST"))
+        (return-list2-label (gen-label env "APPEND_RET_L2"))
+        (end-label (gen-label env "APPEND_END"))
+        (code '()))
+    
+    ;; 1. Évaluer list1 et sauvegarder sur pile
+    (setf code (append code (compile-expr list1-expr env)))
+    (setf code (append code
+      (list
+        (list :ADDI *reg-sp* -4 *reg-sp*)
+        (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Évaluer list2 et sauvegarder sur pile
+    (setf code (append code (compile-expr list2-expr env)))
+    (setf code (append code
+      (list
+        (list :ADDI *reg-sp* -4 *reg-sp*)
+        (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 3. Restaurer dans registres : $T0=list1, $T9=list2
+    (setf code (append code
+      (list
+        (list :LW *reg-t9* *reg-sp* 0)      ; list2
+        (list :ADDI *reg-sp* 4 *reg-sp*)
+        (list :LW *reg-t0* *reg-sp* 0)      ; list1
+        (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. Si list1 est NIL, retourner list2
+    (setf code (append code
+      (list (list :BEQ *reg-t0* *reg-zero* return-list2-label))))
+    
+    ;; 5. Initialiser : $T1=first (résultat), $T2=last
+    (setf code (append code
+      (list
+        (list :LI 0 *reg-t1*)    ; $T1 = 0 (first = NULL)
+        (list :LI 0 *reg-t2*)))) ; $T2 = 0 (last = NULL)
+    
+    ;; 6. Boucle de copie
+    ;; $T0 = curseur source
+    ;; $T1 = première CONS (résultat final)
+    ;; $T2 = dernière CONS (pour chaînage)
+    ;; $T3 = nouvelle CONS allouée
+    ;; $T4 = CAR courant
+    ;; $T5 = temporaire HP
+    
+    (setf code (append code (list (list :LABEL loop-label))))
+    
+    ;; Si fin de list1, sortir
+    (setf code (append code
+      (list (list :BEQ *reg-t0* *reg-zero* end-loop-label))))
+    
+    ;; Charger CAR de l'élément courant
+    (setf code (append code (list (list :LW *reg-t4* *reg-t0* 0))))
+    
+    ;; Allouer nouvelle CONS : $T3 = $GP (heap pointer)
+    (let ((reg-gp (get-reg :gp)))
+      (setf code (append code (list (list :MOVE reg-gp *reg-t3*)))))
+    
+    ;; Écrire CAR dans nouvelle CONS
+    (setf code (append code (list (list :SW *reg-t4* *reg-t3* 0))))
+    
+    ;; Écrire CDR = 0 temporairement
+    (setf code (append code (list (list :SW *reg-zero* *reg-t3* 1))))
+    
+    ;; Avancer $GP (heap pointer) de 2 mots
+    (let ((reg-gp (get-reg :gp)))
+      (setf code (append code (list (list :ADDI reg-gp 2 reg-gp)))))
+    
+    ;; Si c'est la première CONS ($T1 == 0), l'initialiser
+    (setf code (append code
+      (list (list :BNE *reg-t1* *reg-zero* not-first-label))))
+    
+    (setf code (append code
+      (list
+        (list :LABEL first-cons-label)
+        (list :MOVE *reg-t3* *reg-t1*)    ; $T1 = nouvelle CONS (first)
+        (list :MOVE *reg-t3* *reg-t2*)))) ; $T2 = nouvelle CONS (last)
+    
+    ;; Passer à l'élément suivant
+    (setf code (append code
+      (list
+        (list :LW *reg-t0* *reg-t0* 1)     ; source = CDR(source)
+        (list :J loop-label))))
+    
+    ;; Sinon, chaîner à la dernière CONS
+    (setf code (append code (list (list :LABEL not-first-label))))
+    (setf code (append code
+      (list
+        (list :SW *reg-t3* *reg-t2* 1)     ; last->cdr = nouvelle CONS
+        (list :MOVE *reg-t3* *reg-t2*)     ; $T2 = nouvelle CONS (last)
+        (list :LW *reg-t0* *reg-t0* 1)     ; source = CDR(source)
+        (list :J loop-label))))
+    
+    ;; Fin de boucle : attacher list2
+    (setf code (append code (list (list :LABEL end-loop-label))))
+    
+    ;; Si last existe, faire pointer son CDR vers list2
+    (setf code (append code
+      (list
+        (list :BEQ *reg-t2* *reg-zero* return-list2-label)
+        (list :SW *reg-t9* *reg-t2* 1)     ; last->cdr = list2
+        (list :MOVE *reg-t1* *reg-v0*)     ; $V0 = first (retour)
+        (list :J end-label))))
+    
+    ;; Cas spécial : list1 était NIL, retourner list2
+    (setf code (append code
+      (list
+        (list :LABEL return-list2-label)
+        (list :MOVE *reg-t9* *reg-v0*))))
+    
+    (setf code (append code (list (list :LABEL end-label))))
     
     code))
 
@@ -2627,6 +2941,15 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:nth
        (compile-nth (second parsed) (third parsed) env))
       
+      (:assoc
+       (compile-assoc (second parsed) (third parsed) env))
+      
+      (:member
+       (compile-member (second parsed) (third parsed) env))
+      
+      (:append
+       (compile-append (second parsed) (third parsed) env))
+      
       (:vm-primitive
        (compile-vm-primitive (second parsed) (third parsed) env))
       
@@ -3172,18 +3495,20 @@ qui a défini la fonction, ou NIL si non trouvée."
   (let ((env (make-new-compiler-env)))
     (compile-expr expr env)))
 
-(defun compile-and-run (expr &key (verbose nil))
+(defun compile-and-run (expr &key (verbose nil) (show-code nil))
   "Compile et exécute une expression LISP"
   (let ((vm (make-new-vm :verbose verbose))
         (asm-code (append (compile-lisp expr)
                          (list (list :PRINT *reg-v0*)  ; Afficher le résultat
                                (list :HALT)))))    ; Arrêter la VM
-    (format t "~%=== CODE ASSEMBLEUR GÉNÉRÉ ===~%")
-    (dolist (instr asm-code)
-      (format t "~A~%" instr))
-    (format t "~%=== EXÉCUTION ===~%")
+    (when show-code
+      (format t "~%=== CODE ASSEMBLEUR GÉNÉRÉ ===~%")
+      (dolist (instr asm-code)
+        (format t "~A~%" instr))
+      (format t "~%=== EXÉCUTION ===~%"))
     (load-and-run vm asm-code :verbose verbose)
-    (format t "~%Résultat dans $v0: ~A~%" (get-register vm *reg-v0*))
+    (when show-code
+      (format t "~%Résultat dans $v0: ~A~%" (get-register vm *reg-v0*)))
     vm))
 
 ;;; ============================================================================
