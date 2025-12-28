@@ -136,18 +136,19 @@
 
 (defun append-code (vm asm-code &key (verbose nil))
   "Ajoute du code à la suite du code existant"
-  (multiple-value-bind (resolved-code labels)
-      (preprocess-code asm-code)
+  ;; Trouver la fin du code existant
+  (let* ((code-start (calculate-code-start vm))
+         (current-addr code-start))
+    ;; Chercher la première cellule vide
+    (loop while (and (< current-addr *maxmem*)
+                     (not (zerop (mem-read vm current-addr))))
+          do (incf current-addr))
     
-    (validate-program resolved-code)
-    
-    ;; Trouver la fin du code existant
-    (let* ((code-start (calculate-code-start vm))
-           (current-addr code-start))
-      ;; Chercher la première cellule vide
-      (loop while (and (< current-addr *maxmem*)
-                       (not (zerop (mem-read vm current-addr))))
-            do (incf current-addr))
+    ;; Prétraiter le code avec la bonne adresse de départ
+    (multiple-value-bind (resolved-code labels)
+        (preprocess-code asm-code current-addr)
+      
+      (validate-program resolved-code)
       
       ;; Charger le nouveau code
       (let ((offset (- current-addr code-start)))

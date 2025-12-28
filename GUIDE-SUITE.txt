@@ -1,0 +1,201 @@
+═══════════════════════════════════════════════════════════════════
+GUIDE RAPIDE - PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════
+
+✅ ÉTAT ACTUEL: dolist implémenté et validé
+🎯 OBJECTIF: Compiler loader.lisp complet
+
+
+═══════════════════════════════════════════════════════════════════
+COMMANDES DE TEST RAPIDES
+═══════════════════════════════════════════════════════════════════
+
+# Vérifier que tout fonctionne
+clisp test-hash-table-primitives.lisp
+clisp test-dolist.lisp
+clisp test-compilation-full-fibo.lisp
+
+
+═══════════════════════════════════════════════════════════════════
+PRIMITIVE DISPONIBLES
+═══════════════════════════════════════════════════════════════════
+
+Hash-tables:
+  vm-make-hash-table :test 'equal    → Crée hash-table
+  vm-gethash key table               → Lit valeur
+  vm-hash-set table key value        → Écrit valeur
+  vm-hash-table-count table          → Compte entrées
+  vm-hash-has-key table key          → Test existence
+
+Type checking:
+  (if (vm-consp x) ...)              → Test si cons
+  (if (vm-listp x) ...)              → Test si liste
+  (if (vm-symbolp x) ...)            → Test si symbole
+
+Listes:
+  vm-car lst                         → Premier élément
+  vm-cdr lst                         → Reste de la liste
+  vm-cons car cdr                    → Crée paire
+  vm-first lst                       → = vm-car
+  vm-second lst                      → = (vm-car (vm-cdr lst))
+
+Iteration:
+  (dolist (var list) body...)        → Boucle sur liste
+
+
+═══════════════════════════════════════════════════════════════════
+CODE ADAPTÉ POUR COLLECT-LABELS
+═══════════════════════════════════════════════════════════════════
+
+Version originale (loader.lisp):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(defun collect-labels (asm-code code-start)
+  (let ((labels (make-hash-table :test 'equal))
+        (position 0))
+    (dolist (instr asm-code)
+      (if (and (listp instr) (eq (first instr) :LABEL))
+          (setf (gethash (second instr) labels) 
+                (+ code-start position))
+          (incf position)))
+    labels))
+
+Version adaptée (compilable):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(defun collect-labels-vm (asm-code code-start)
+  (let ((labels (vm-make-hash-table :test 'equal))
+        (position 0))
+    (dolist (instr asm-code)
+      (if (and (vm-consp instr) 
+               (eq (vm-car instr) :LABEL))
+          (vm-hash-set labels 
+                      (vm-car (vm-cdr instr))
+                      (+ code-start position))
+          (setq position (+ position 1))))
+    labels))
+
+Changements:
+  make-hash-table  → vm-make-hash-table
+  listp            → vm-consp
+  first            → vm-car
+  second           → vm-car + vm-cdr
+  setf gethash     → vm-hash-set
+  incf             → setq (+ position 1)
+
+
+═══════════════════════════════════════════════════════════════════
+TEST À CRÉER: test-collect-labels-full.lisp
+═══════════════════════════════════════════════════════════════════
+
+(load "src/asm-ops.lisp")
+(load "src/vm.lisp")
+(load "src/loader.lisp")
+(load "src/compiler.lisp")
+
+(defparameter *collect-labels-vm*
+  '(defun collect-labels-vm (asm-code code-start)
+     (let ((labels (vm-make-hash-table :test 'equal))
+           (position 0))
+       (dolist (instr asm-code)
+         (if (and (vm-consp instr) 
+                  (eq (vm-car instr) :LABEL))
+             (vm-hash-set labels 
+                         (vm-car (vm-cdr instr))
+                         (+ code-start position))
+             (setq position (+ position 1))))
+       labels)))
+
+(format t "Compilation...~%")
+(defparameter *compiled* (compile-lisp *collect-labels-vm*))
+(format t "✓ Compilé: ~A instructions~%" (length *compiled*))
+
+
+═══════════════════════════════════════════════════════════════════
+PROBLÈME POTENTIEL: eq vs equal
+═══════════════════════════════════════════════════════════════════
+
+Dans le code: (eq (vm-car instr) :LABEL)
+
+⚠️  ATTENTION: eq compare identité, pas contenu
+    Pour les keywords, ça fonctionne (interned)
+    Mais si vm-car retourne un handle, eq échouera
+
+Solution possible:
+  1. Utiliser equal au lieu de eq
+  2. S'assurer que vm-car retourne directement les keywords
+  3. Implémenter vm-eq qui gère les handles
+
+
+═══════════════════════════════════════════════════════════════════
+PROCHAINES PRIMITIVES À TESTER/IMPLÉMENTER
+═══════════════════════════════════════════════════════════════════
+
+Priorité HAUTE:
+  ☐ Tester vm-listp, vm-symbolp, vm-consp en exécution
+  ☐ Tester vm-car, vm-cdr avec vraies listes
+  ☐ Implémenter vm-equal (si nécessaire pour comparaisons)
+
+Priorité MOYENNE:
+  ☐ mapcar (si nécessaire pour resolve-labels)
+  ☐ maphash (si nécessaire pour debug)
+  ☐ keyword-to-symbol (si nécessaire)
+
+Priorité BASSE:
+  ☐ vm-rest (= vm-cdr)
+  ☐ vm-atom
+  ☐ autres prédicats
+
+
+═══════════════════════════════════════════════════════════════════
+STRATÉGIE RECOMMANDÉE
+═══════════════════════════════════════════════════════════════════
+
+OPTION A: Tester collect-labels directement
+  1. Compiler collect-labels-vm
+  2. Créer une liste d'instructions depuis Lisp
+  3. Passer la liste à collect-labels-vm compilé
+  4. Vérifier que la hash-table est correcte
+  
+  Difficulté: Création de liste compatible avec handles
+  Temps estimé: 1-2 heures
+
+OPTION B: Réécrire sans listes imbriquées
+  1. Simplifier collect-labels pour utiliser des compteurs
+  2. Éviter manipulation directe de listes
+  3. Tester version simplifiée
+  
+  Difficulté: Plus simple mais moins général
+  Temps estimé: 30 min
+
+RECOMMANDATION: Commencer par Option A pour valider tout le système
+
+
+═══════════════════════════════════════════════════════════════════
+COMMANDE POUR CONTINUER
+═══════════════════════════════════════════════════════════════════
+
+# Créer le test
+cat > test-collect-labels-full.lisp << 'EOF'
+[... code du test ...]
+EOF
+
+# Exécuter
+clisp test-collect-labels-full.lisp
+
+
+═══════════════════════════════════════════════════════════════════
+RÉSUMÉ
+═══════════════════════════════════════════════════════════════════
+
+✅ Dolist fonctionne
+✅ Hash-tables fonctionnent
+✅ Primitives listes disponibles
+✅ Simple-loader OK
+
+🎯 Prochaine étape: Tester collect-labels-vm
+📄 Fichier à créer: test-collect-labels-full.lisp
+⏱️  Temps estimé: 1-2 heures
+
+
+═══════════════════════════════════════════════════════════════════
+FIN DU GUIDE
+═══════════════════════════════════════════════════════════════════

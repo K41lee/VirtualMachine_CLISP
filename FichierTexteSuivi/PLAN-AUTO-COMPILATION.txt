@@ -1,0 +1,534 @@
+═══════════════════════════════════════════════════════════════════
+PLAN D'ACTION : AUTO-COMPILATION DU COMPILATEUR (BOOTSTRAPPING)
+Date : 28 décembre 2025
+═══════════════════════════════════════════════════════════════════
+
+╔══════════════════════════════════════════════════════════════════╗
+║                          OBJECTIF FINAL                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Le compilateur doit pouvoir se compiler lui-même :
+  • Compiler compiler.lisp avec le compilateur chargé dans la VM
+  • Obtenir du code MIPS fonctionnel
+  • Charger et exécuter le compilateur compilé dans la VM
+  • Utiliser ce compilateur compilé pour compiler d'autres programmes
+
+═══════════════════════════════════════════════════════════════════
+ANALYSE DE L'ÉTAT ACTUEL
+═══════════════════════════════════════════════════════════════════
+
+COMPILATEUR ACTUEL (compiler.lisp)
+  • Taille           : 3,792 lignes
+  • Fonctions        : 87 fonctions
+  • Dépendances      : vm.lisp, asm-ops.lisp, loader.lisp
+
+CONSTRUCTIONS SUPPORTÉES ACTUELLEMENT
+  ✓ defun            - Définition de fonctions
+  ✓ if               - Conditionnelle simple
+  ✓ let / let*       - Variables locales
+  ✓ setq             - Affectation
+  ✓ progn            - Séquence d'expressions
+  ✓ cond             - Conditionnelle multiple
+  ✓ case             - Sélection par valeur
+  ✓ while            - Boucle conditionnelle
+  ✓ dolist           - Itération sur listes
+  ✓ loop             - Boucles générales
+  ✓ lambda           - Fonctions anonymes
+  ✓ funcall          - Appel indirect
+  ✓ apply            - Application de fonction
+  ✓ defvar           - Variables globales
+  ✓ defconstant      - Constantes globales
+
+CONSTRUCTIONS UTILISÉES PAR LE COMPILATEUR
+  • defparameter      : Variables globales (nombreuses)
+  • defstruct         : Structures de données (compiler-env)
+  • let* / let        : Variables locales (partout)
+  • cond              : Conditions multiples (parse-lisp-expr)
+  • case              : Sélection (compile-operator)
+  • loop              : Boucles complexes (lookup, free-variables)
+  • dolist            : Itération (compile-progn, etc.)
+  • lambda            : Closures (mapcar, etc.)
+  • funcall / apply   : Appels dynamiques
+  • member            : Recherche dans listes
+  • append            : Concaténation de listes
+  • car / cdr / cadr  : Manipulation de listes
+  • hash-tables       : Tables de symboles
+
+═══════════════════════════════════════════════════════════════════
+PHASE 1 : ANALYSE DES MANQUES (DIAGNOSTIC)
+═══════════════════════════════════════════════════════════════════
+
+PRIORITÉ CRITIQUE (BLOQUANTS)
+  ❌ defstruct        - Le compilateur utilise (defstruct compiler-env)
+  ❌ loop avancé      - for, collect, when (utilisé dans plusieurs endroits)
+  ❌ multiple-value-bind - Retours multiples (utilisé pour preprocess-code)
+  ❌ destructuring-bind  - Déstructuration de listes
+  ❌ &optional / &rest   - Paramètres optionnels et variadiques
+  ❌ &key               - Paramètres nommés (très utilisé)
+
+PRIORITÉ HAUTE (IMPORTANTES)
+  ⚠️  member / assoc    - Recherche dans listes/alists
+  ⚠️  append / reverse  - Manipulation de listes
+  ⚠️  mapcar / mapc     - Mapping sur listes
+  ⚠️  remove-if / find-if - Filtrage de listes
+  ⚠️  some / every      - Prédicats sur listes
+  ⚠️  format (avancé)   - Formatage de strings
+  ⚠️  error             - Gestion d'erreurs
+
+PRIORITÉ MOYENNE (SOUHAITABLES)
+  ○  gensym            - Génération de symboles uniques
+  ○  push / pop        - Manipulation de piles
+  ○  incf / decf       - Incrémentation/décrémentation
+  ○  when / unless     - Conditionnelles simplifiées
+  ○  and / or (macro)  - Court-circuit logique
+  ○  values            - Retours multiples explicites
+
+═══════════════════════════════════════════════════════════════════
+PHASE 2 : STRATÉGIE D'IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════
+
+APPROCHE 1 : BOOTSTRAPPING PROGRESSIF
+  1. Implémenter les constructions manquantes une par une
+  2. Tester chaque nouvelle construction
+  3. Compiler des sous-ensembles croissants du compilateur
+  4. Atteindre progressivement l'auto-compilation complète
+
+APPROCHE 2 : COMPILATION PAR SOUS-ENSEMBLES
+  1. Identifier les fonctions les plus simples du compilateur
+  2. Les compiler en premier (ex: gen-label, lisp-atom-p)
+  3. Compiler progressivement les fonctions plus complexes
+  4. Terminer par les fonctions de haut niveau
+
+APPROCHE 3 : SIMPLIFICATION TEMPORAIRE
+  1. Créer une version simplifiée du compilateur (compiler-mini.lisp)
+  2. Retirer les fonctionnalités avancées non essentielles
+  3. Compiler cette version simplifiée
+  4. Utiliser le compilateur compilé pour compiler la version complète
+
+RECOMMANDATION : APPROCHE 1 + 2 (HYBRIDE)
+  • Implémenter les constructions manquantes prioritaires
+  • Compiler d'abord les fonctions utilitaires simples
+  • Progresser vers les fonctions complexes
+  • Tester à chaque étape
+
+═══════════════════════════════════════════════════════════════════
+PHASE 3 : PLAN D'ACTION DÉTAILLÉ PAS À PAS
+═══════════════════════════════════════════════════════════════════
+
+ÉTAPE 1 : PRÉPARATION (1-2 jours)
+───────────────────────────────────────────────────────────────────
+1.1 Analyser toutes les constructions utilisées dans compiler.lisp
+    → Commande : grep -E "(defstruct|loop|member|append)" src/compiler.lisp
+    → Créer une liste exhaustive des constructions manquantes
+    → Classifier par priorité (critique/haute/moyenne)
+
+1.2 Créer des tests unitaires pour chaque construction
+    → test-defstruct.lisp
+    → test-loop-advanced.lisp
+    → test-multiple-value-bind.lisp
+    → test-keyword-parameters.lisp
+    → etc.
+
+1.3 Établir une baseline de compilation
+    → Essayer de compiler compiler.lisp avec le compilateur actuel
+    → Noter les erreurs précises
+    → Documenter les fonctions qui échouent
+
+ÉTAPE 2 : DEFSTRUCT (2-3 jours)
+───────────────────────────────────────────────────────────────────
+2.1 Implémenter (defstruct name slots...)
+    → Générer un constructeur (make-name)
+    → Générer des accesseurs (name-slot)
+    → Générer un prédicat (name-p)
+    → Stocker la structure dans une hash-table globale
+
+2.2 Tester avec des structures simples
+    → (defstruct point x y)
+    → (make-point :x 10 :y 20)
+    → (point-x p)
+
+2.3 Compiler compiler-env
+    → La structure principale du compilateur
+    → Tester tous les accesseurs
+
+ÉTAPE 3 : LOOP AVANCÉ (3-4 jours)
+───────────────────────────────────────────────────────────────────
+3.1 Implémenter (loop for var in list ...)
+    → Boucle sur une liste
+    → Liaison de variable
+
+3.2 Implémenter (loop for var from start to end ...)
+    → Boucle numérique
+    → Incrémentation automatique
+
+3.3 Implémenter les clauses COLLECT et APPEND
+    → (loop ... collect expr)
+    → (loop ... append list-expr)
+    → Accumulateurs implicites
+
+3.4 Implémenter les clauses WHEN et UNLESS
+    → (loop ... when condition collect expr)
+    → Filtrage conditionnel
+
+3.5 Implémenter DO
+    → (loop ... do (side-effect))
+    → Corps de boucle
+
+ÉTAPE 4 : PARAMÈTRES AVANCÉS (2-3 jours)
+───────────────────────────────────────────────────────────────────
+4.1 Implémenter &optional
+    → Paramètres optionnels
+    → Valeurs par défaut
+    → Tests de présence
+
+4.2 Implémenter &rest
+    → Paramètres variadiques
+    → Liste des arguments restants
+
+4.3 Implémenter &key
+    → Paramètres nommés
+    → Valeurs par défaut
+    → Recherche par nom
+
+4.4 Combiner les trois
+    → (defun f (a b &optional c &rest r &key x y) ...)
+    → Ordre et interaction corrects
+
+ÉTAPE 5 : RETOURS MULTIPLES (1-2 jours)
+───────────────────────────────────────────────────────────────────
+5.1 Implémenter values
+    → (values a b c)
+    → Retourner plusieurs valeurs
+    → Utiliser des registres multiples
+
+5.2 Implémenter multiple-value-bind
+    → (multiple-value-bind (a b c) (func) body)
+    → Lier plusieurs valeurs retournées
+    → Gérer le cas où moins de valeurs sont retournées
+
+5.3 Implémenter values-list
+    → (values-list '(1 2 3))
+    → Conversion liste → values
+
+ÉTAPE 6 : FONCTIONS DE LISTES (2-3 jours)
+───────────────────────────────────────────────────────────────────
+6.1 Implémenter member
+    → (member item list &key test)
+    → Retourne la sous-liste commençant par item
+
+6.2 Implémenter assoc
+    → (assoc key alist &key test)
+    → Recherche dans une alist
+
+6.3 Implémenter append
+    → (append list1 list2 ...)
+    → Concaténation de listes
+
+6.4 Implémenter reverse
+    → (reverse list)
+    → Inversion de liste
+
+6.5 Implémenter mapcar et mapc
+    → (mapcar func list)
+    → Application de fonction
+
+6.6 Implémenter remove-if et find-if
+    → (remove-if predicate list)
+    → (find-if predicate list)
+    → Filtrage
+
+6.7 Implémenter some et every
+    → (some predicate list)
+    → (every predicate list)
+    → Prédicats collectifs
+
+ÉTAPE 7 : MACROS ET UTILITAIRES (1-2 jours)
+───────────────────────────────────────────────────────────────────
+7.1 Implémenter when et unless
+    → (when test body...) → (if test (progn body...))
+    → (unless test body...) → (if (not test) (progn body...))
+
+7.2 Implémenter push et pop
+    → (push item place)
+    → (pop place)
+    → Manipulation de piles
+
+7.3 Implémenter incf et decf
+    → (incf place &optional delta)
+    → (decf place &optional delta)
+
+7.4 Implémenter and et or (avec court-circuit)
+    → (and a b c) → évaluation paresseuse
+    → (or a b c) → évaluation paresseuse
+
+ÉTAPE 8 : COMPILATION PARTIELLE (2-3 jours)
+───────────────────────────────────────────────────────────────────
+8.1 Identifier les fonctions utilitaires simples
+    → gen-label
+    → lisp-atom-p
+    → lisp-list-p
+    → vm-primitive-p
+
+8.2 Compiler ces fonctions une par une
+    → Tester chaque compilation
+    → Charger dans la VM
+    → Exécuter et vérifier les résultats
+
+8.3 Compiler les fonctions de parsing
+    → parse-lisp-expr (complexe!)
+    → Décomposer en sous-fonctions si nécessaire
+
+8.4 Compiler les fonctions de génération de code
+    → compile-if
+    → compile-let
+    → compile-setq
+    → etc.
+
+ÉTAPE 9 : GESTION DES DÉPENDANCES (2-3 jours)
+───────────────────────────────────────────────────────────────────
+9.1 Analyser les dépendances inter-fonctions
+    → Graphe de dépendances
+    → Ordre de compilation correct
+
+9.2 Résoudre les références croisées
+    → Forward declarations si nécessaire
+    → Table des symboles globale
+
+9.3 Gérer les constantes et variables globales
+    → defparameter → initialisation au chargement
+    → Allocation mémoire pour les globales
+
+ÉTAPE 10 : AUTO-COMPILATION COMPLÈTE (3-5 jours)
+───────────────────────────────────────────────────────────────────
+10.1 Compiler compiler.lisp au complet
+     → Utiliser compile-and-load-file sur compiler.lisp
+     → Résoudre les erreurs une par une
+     → Documenter les problèmes
+
+10.2 Charger le compilateur compilé dans une VM
+     → Allouer suffisamment de mémoire
+     → Initialiser les tables globales
+     → Vérifier l'état de la VM
+
+10.3 Tester le compilateur compilé
+     → Compiler des programmes simples (fibonacci)
+     → Compiler le loader
+     → Vérifier la correction des résultats
+
+10.4 Benchmark et optimisation
+     → Mesurer les performances
+     → Comparer avec le compilateur natif
+     → Optimiser les points critiques
+
+ÉTAPE 11 : BOOTSTRAPPING COMPLET (2-3 jours)
+───────────────────────────────────────────────────────────────────
+11.1 Le compilateur compilé compile compiler.lisp
+     → Auto-compilation niveau 2
+     → Vérifier l'idempotence
+
+11.2 Comparaison des versions
+     → Compiler avec compilateur natif : C1
+     → Compiler avec C1 : C2
+     → C1 et C2 doivent être identiques (ou équivalents)
+
+11.3 Tests de régression
+     → Tous les tests existants doivent passer
+     → Le compilateur compilé doit être aussi capable
+
+═══════════════════════════════════════════════════════════════════
+PHASE 4 : TESTS ET VALIDATION
+═══════════════════════════════════════════════════════════════════
+
+TESTS UNITAIRES (pour chaque construction)
+  □ test-defstruct.lisp          - Structures de données
+  □ test-loop-advanced.lisp      - Boucles complexes
+  □ test-multiple-values.lisp    - Retours multiples
+  □ test-keyword-params.lisp     - Paramètres &key
+  □ test-optional-params.lisp    - Paramètres &optional
+  □ test-rest-params.lisp        - Paramètres &rest
+  □ test-list-functions.lisp     - member, append, etc.
+  □ test-macros.lisp             - when, unless, push, etc.
+
+TESTS D'INTÉGRATION
+  □ test-compile-utility-funcs.lisp   - Fonctions simples
+  □ test-compile-parser.lisp          - parse-lisp-expr
+  □ test-compile-compiler-subset.lisp - Sous-ensemble du compilateur
+  □ test-auto-compilation.lisp        - Compilation complète
+
+TESTS DE VALIDATION FINALE
+  □ test-bootstrap-level1.lisp   - Compiler compiler.lisp
+  □ test-bootstrap-level2.lisp   - C1 compile compiler.lisp → C2
+  □ test-idempotence.lisp        - C1 ≡ C2
+  □ test-performance.lisp        - Benchmarks
+
+═══════════════════════════════════════════════════════════════════
+PHASE 5 : ESTIMATION DE TEMPS ET RESSOURCES
+═══════════════════════════════════════════════════════════════════
+
+TEMPS ESTIMÉ PAR PHASE
+  Étape 1  : Préparation              → 1-2 jours
+  Étape 2  : DEFSTRUCT                → 2-3 jours
+  Étape 3  : LOOP avancé              → 3-4 jours
+  Étape 4  : Paramètres avancés       → 2-3 jours
+  Étape 5  : Retours multiples        → 1-2 jours
+  Étape 6  : Fonctions de listes      → 2-3 jours
+  Étape 7  : Macros et utilitaires    → 1-2 jours
+  Étape 8  : Compilation partielle    → 2-3 jours
+  Étape 9  : Gestion des dépendances  → 2-3 jours
+  Étape 10 : Auto-compilation         → 3-5 jours
+  Étape 11 : Bootstrapping complet    → 2-3 jours
+  
+  TOTAL                               → 21-33 jours
+
+DÉCOMPOSITION ALTERNATIVE (phases prioritaires)
+  Phase critique (bloquants)          → 10-15 jours
+  Phase haute priorité                → 6-9 jours
+  Phase moyenne priorité              → 5-9 jours
+
+TEMPS MINIMUM (avec focus strict)     → 15-20 jours
+TEMPS RÉALISTE (avec tests complets)  → 25-30 jours
+TEMPS CONFORTABLE (avec optimisation) → 35-40 jours
+
+═══════════════════════════════════════════════════════════════════
+PHASE 6 : RISQUES ET MITIGATION
+═══════════════════════════════════════════════════════════════════
+
+RISQUES TECHNIQUES
+  ⚠️  Complexité de LOOP
+     → Mitigé par : Implémentation incrémentale, tests unitaires
+  
+  ⚠️  Gestion mémoire insuffisante
+     → Mitigé par : Augmenter *code-size* et *maxmem*
+  
+  ⚠️  Bugs dans les nouvelles constructions
+     → Mitigé par : Tests unitaires exhaustifs avant intégration
+  
+  ⚠️  Interactions entre constructions
+     → Mitigé par : Tests d'intégration progressifs
+  
+  ⚠️  Performance du compilateur compilé
+     → Mitigé par : Profiling et optimisation ciblée
+
+RISQUES DE PROJET
+  ⚠️  Sous-estimation du temps
+     → Mitigé par : Marges de sécurité dans les estimations
+  
+  ⚠️  Scope creep (ajout de fonctionnalités)
+     → Mitigé par : Focus strict sur l'auto-compilation
+  
+  ⚠️  Démotivation sur tâches longues
+     → Mitigé par : Jalons intermédiaires, célébration des succès
+
+═══════════════════════════════════════════════════════════════════
+PHASE 7 : JALONS ET LIVRABLES
+═══════════════════════════════════════════════════════════════════
+
+JALON 1 : CONSTRUCTIONS DE BASE (J+7)
+  ✓ DEFSTRUCT implémenté et testé
+  ✓ LOOP basique (for in, for from-to)
+  ✓ &optional et &rest implémentés
+  → LIVRABLE : test-constructions-base.lisp réussit
+
+JALON 2 : CONSTRUCTIONS AVANCÉES (J+14)
+  ✓ LOOP complet (collect, append, when)
+  ✓ &key implémenté
+  ✓ multiple-value-bind fonctionnel
+  ✓ Fonctions de listes (member, append, mapcar)
+  → LIVRABLE : test-constructions-avancees.lisp réussit
+
+JALON 3 : COMPILATION PARTIELLE (J+21)
+  ✓ 20+ fonctions du compilateur compilées avec succès
+  ✓ Fonctions utilitaires fonctionnent dans la VM
+  ✓ parse-lisp-expr compilé et testé
+  → LIVRABLE : test-compile-compiler-subset.lisp réussit
+
+JALON 4 : AUTO-COMPILATION (J+28)
+  ✓ compiler.lisp compile sans erreur
+  ✓ Compilateur compilé chargé dans la VM
+  ✓ Compilateur compilé peut compiler fibonacci
+  → LIVRABLE : test-auto-compilation.lisp réussit
+
+JALON 5 : BOOTSTRAPPING COMPLET (J+35)
+  ✓ C1 compile compiler.lisp → C2
+  ✓ C2 compile compiler.lisp → C3
+  ✓ C2 ≡ C3 (idempotence)
+  ✓ Tous les tests de régression passent
+  → LIVRABLE : Compilateur auto-hébergé fonctionnel
+
+═══════════════════════════════════════════════════════════════════
+PHASE 8 : PROCHAINE ACTION IMMÉDIATE
+═══════════════════════════════════════════════════════════════════
+
+ACTIONS POUR DÉMARRER DÈS MAINTENANT
+  
+  1. ANALYSER LES CONSTRUCTIONS MANQUANTES
+     $ grep -E "(defstruct|loop for|&key|&optional|&rest|multiple-value-bind)" \
+       src/compiler.lisp > analyse-constructions.txt
+     $ grep -E "(member|append|mapcar|remove-if)" \
+       src/compiler.lisp >> analyse-constructions.txt
+  
+  2. CRÉER LA STRUCTURE DE TESTS
+     $ mkdir -p tests/bootstrapping
+     $ touch tests/bootstrapping/test-defstruct.lisp
+     $ touch tests/bootstrapping/test-loop-advanced.lisp
+  
+  3. ESSAYER UNE COMPILATION INITIALE
+     $ clisp -x "(load \"src/compiler.lisp\") \
+                 (with-open-file (s \"compiler-errors.txt\" \
+                                  :direction :output) \
+                   (handler-case \
+                     (compile-lisp '(load \"src/compiler.lisp\")) \
+                     (error (e) (format s \"~A\" e))))"
+     → Documenter les erreurs précises
+  
+  4. IMPLÉMENTER LA PREMIÈRE CONSTRUCTION (DEFSTRUCT)
+     → Commencer par le plus bloquant
+     → Créer test-defstruct.lisp en parallèle
+     → Itérer jusqu'à ce que le test passe
+  
+  5. DOCUMENTER L'AVANCEMENT
+     → Créer AVANCEMENT-BOOTSTRAPPING.txt
+     → Tenir à jour la liste des constructions implémentées
+     → Noter les problèmes rencontrés et solutions
+
+═══════════════════════════════════════════════════════════════════
+RECOMMANDATIONS FINALES
+═══════════════════════════════════════════════════════════════════
+
+APPROCHE RECOMMANDÉE
+  ✓ Commencer par DEFSTRUCT (bloquant critique)
+  ✓ Continuer avec LOOP avancé (très utilisé)
+  ✓ Implémenter &key, &optional, &rest (paramètres)
+  ✓ Ajouter les fonctions de listes (member, append, etc.)
+  ✓ Compiler progressivement des sous-ensembles
+  ✓ Tester continuellement
+  ✓ Documenter chaque étape
+
+PHILOSOPHIE
+  • "Test first" : Créer le test avant l'implémentation
+  • "Incremental" : Avancer par petits pas validés
+  • "Pragmatic" : Se concentrer sur ce qui marche
+  • "Documented" : Tracer toutes les décisions
+
+CRITÈRES DE SUCCÈS
+  ✓ compiler.lisp compile sans erreur
+  ✓ Le compilateur compilé peut compiler fibonacci
+  ✓ Le compilateur compilé peut se compiler lui-même
+  ✓ C2 ≡ C3 (idempotence démontrée)
+  ✓ Performance acceptable (facteur 10-100x plus lent OK)
+
+═══════════════════════════════════════════════════════════════════
+FIN DU PLAN
+═══════════════════════════════════════════════════════════════════
+
+Ce plan d'action détaillé fournit une feuille de route claire et
+structurée pour atteindre l'auto-compilation du compilateur.
+
+L'objectif est ambitieux mais atteignable en suivant une approche
+méthodique et incrémentale, avec des tests à chaque étape.
+
+Durée estimée totale : 25-35 jours de développement
+Complexité : Élevée
+Faisabilité : Excellente avec approche systématique
+
+PROCHAINE ÉTAPE : Commencer par DEFSTRUCT (Étape 2)

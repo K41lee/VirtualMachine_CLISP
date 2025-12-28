@@ -33,6 +33,7 @@
 (defparameter *reg-s6* :$S6)
 (defparameter *reg-s7* :$S7)
 (defparameter *reg-sp* :$SP)
+(defparameter *reg-fp* :$FP)
 (defparameter *reg-ra* :$RA)
 (defparameter *reg-zero* :$ZERO)
 
@@ -62,7 +63,12 @@
 ;;; ============================================================================
 
 (defparameter *vm-primitives* 
-  '(mem-write mem-read set-register get-register get-reg)
+  '(mem-write mem-read set-register get-register get-reg
+    vm-make-hash-table vm-gethash vm-hash-set vm-hash-table-count vm-hash-has-key vm-maphash
+    vm-listp vm-symbolp vm-keywordp vm-consp vm-atom
+    vm-first vm-second vm-car vm-cdr vm-rest vm-cons vm-cadr
+    vm-equal
+    vm-defstruct vm-make-struct vm-struct-get vm-struct-set vm-struct-p vm-struct-type)
   "Liste des fonctions primitives de la VM qui nécessitent un traitement spécial")
 
 (defun vm-primitive-p (symbol)
@@ -497,6 +503,17 @@ qui a défini la fonction, ou NIL si non trouvée."
           ;; La valeur peut être un littéral ou expression - laissée brute pour eval
           (list :defconstant (first args) (second args)))
          
+         ;; BOOTSTRAPPING - Définition de structure
+         (defstruct
+          ;; Syntaxe: (defstruct nom slot1 slot2 ...)
+          ;; Ex: (defstruct point x y)
+          ;; Retourne le nom de la structure
+          (if (>= (length args) 1)
+              (let ((struct-name (first args))
+                    (slots (rest args)))
+                (list :defstruct struct-name slots))
+              (error "DEFSTRUCT nécessite au moins un nom: ~A" expr)))
+         
          ;; PHASE 11 - Définition de variable globale
          ((defvar defparameter)
           ;; Syntaxe: (defvar *nom* valeur [docstring])
@@ -797,6 +814,11 @@ qui a défini la fonction, ou NIL si non trouvée."
                    (let ((offset (cdr location)))  ; FIXÉ: utiliser cdr pour dotted pair
                      (list (list :LW *reg-v0* *reg-sp* offset))))  ; Format: (LW dest base offset)
             
+            ;; Cas 2bis : Variable sur la pile avec offset depuis FP (let avec pile)
+            ((and (consp location) (eq (car location) :frame) (= var-depth current-depth))
+             (let ((offset (cdr location)))
+               (list (list :LW *reg-v0* *reg-fp* offset))))  ; Format: (LW dest base offset)
+            
             ;; Cas 3 : Variable paramètre fonction (offset depuis FP, même scope)
             ((and (consp location) (eq (car location) :fp) (= var-depth current-depth))
              (let ((offset (cdr location)))  ; FIXÉ: utiliser cdr pour dotted pair
@@ -991,7 +1013,7 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; ============================================================================
 
 (defun compile-comparison (op args env)
-  "Compile une comparaison - utilise pile et registres $S2/$S3 pour éviter conflits"
+  "Compile une comparaison - utilise pile et registres $T0/$T1 pour éviter conflits avec paramètres"
   (unless (= (length args) 2)
     (error "Comparaison requiert exactement 2 arguments"))
   
@@ -1005,24 +1027,24 @@ qui a défini la fonction, ou NIL si non trouvée."
      (list (list :ADDI *reg-sp* -4 *reg-sp*)
            (list :SW *reg-v0* *reg-sp* 0))
      code2
-     ;; arg2 dans $s3 (pas $t0 ou $t1 qui peuvent contenir des variables)
-     (list (list :MOVE *reg-v0* *reg-s3*))
-     ;; Restaurer arg1 depuis pile dans $s2
-     (list (list :LW *reg-s2* *reg-sp* 0)  ; Format: (LW dest base offset)
+     ;; arg2 dans $t1 (registre temporaire, pas $s2/$s3 qui sont des paramètres)
+     (list (list :MOVE *reg-v0* *reg-t1*))
+     ;; Restaurer arg1 depuis pile dans $t0
+     (list (list :LW *reg-t0* *reg-sp* 0)  ; Format: (LW dest base offset)
            (list :ADDI *reg-sp* 4 *reg-sp*))
-     ;; Effectuer la comparaison ($s2 op $s3 → $v0)
+     ;; Effectuer la comparaison ($t0 op $t1 → $v0)
      (case op
-       (< (list (list :SLT *reg-s2* *reg-s3* *reg-v0*)))
-       (> (list (list :SLT *reg-s3* *reg-s2* *reg-v0*)))
-       (<= (list (list :SLT *reg-s3* *reg-s2* *reg-t2*)
+       (< (list (list :SLT *reg-t0* *reg-t1* *reg-v0*)))
+       (> (list (list :SLT *reg-t1* *reg-t0* *reg-v0*)))
+       (<= (list (list :SLT *reg-t1* *reg-t0* *reg-t2*)
                  (list :LI 1 *reg-t3*)
                  (list :SUB *reg-t3* *reg-t2* *reg-v0*)))
-       (>= (list (list :SLT *reg-s2* *reg-s3* *reg-t2*)
+       (>= (list (list :SLT *reg-t0* *reg-t1* *reg-t2*)
                  (list :LI 1 *reg-t3*)
                  (list :SUB *reg-t3* *reg-t2* *reg-v0*)))
        (= (let ((label-equal (gen-label env "EQUAL"))
                 (label-end (gen-label env "END_EQ")))
-            (list (list :SUB *reg-s2* *reg-s3* *reg-t2*)
+            (list (list :SUB *reg-t0* *reg-t1* *reg-t2*)
                   (list :BEQ *reg-t2* *reg-zero* label-equal)
                   (list :LI 0 *reg-v0*)
                   (list :J label-end)
@@ -1031,7 +1053,7 @@ qui a défini la fonction, ou NIL si non trouvée."
                   (list :LABEL label-end))))
        (/= (let ((label-not-equal (gen-label env "NOT_EQUAL"))
                  (label-end (gen-label env "END_NE")))
-             (list (list :SUB *reg-s2* *reg-s3* *reg-t2*)
+             (list (list :SUB *reg-t0* *reg-t1* *reg-t2*)
                    (list :BNE *reg-t2* *reg-zero* label-not-equal)
                    (list :LI 0 *reg-v0*)
                    (list :J label-end)
@@ -1347,11 +1369,13 @@ qui a défini la fonction, ou NIL si non trouvée."
 
 (defun compile-let (bindings body env)
   "Compile (let ((var1 val1) ...) body)
-   Gère allocation registres/pile et portée lexicale"
+   Gère allocation registres/pile et portée lexicale
+   Utilise $FP pour les variables sur la pile afin d'éviter les problèmes d'offset"
   (let ((new-env (copy-env env))
         (code '())
         (saved-regs '())
-        (stack-slots 0))
+        (stack-slots 0)
+        (uses-fp nil))  ; Flag pour savoir si on utilise $FP
     
     ;; ÉTAPE 1 : Compiler chaque binding
     (dolist (binding bindings)
@@ -1376,16 +1400,25 @@ qui a défini la fonction, ou NIL si non trouvée."
                 ;; Sauvegarder le registre pour libération ultérieure
                 (push reg saved-regs))
               
-              ;; Cas B : Pas de registre disponible - utiliser la pile
-              (let ((offset (alloc-stack-slot new-env)))
+              ;; Cas B : Pas de registre disponible - utiliser la pile avec $FP
+              (progn
+                ;; Si c'est la première variable sur la pile, initialiser $FP
+                (when (= stack-slots 0)
+                  (setf uses-fp t)
+                  ;; Sauvegarder $SP dans $FP pour référence fixe
+                  (setf code (append code
+                                    (list (list :MOVE *reg-sp* *reg-fp*)))))
+                
                 ;; Pousser le résultat sur la pile
                 (setf code (append code
                                   (list (list :ADDI *reg-sp* -4 *reg-sp*)
                                         (list :SW *reg-v0* *reg-sp* 0))))
-                ;; Ajouter la variable à l'environnement (avec offset pile)
-                (add-variable new-env var (cons :stack offset))
-                ;; Compter les slots utilisés
-                (incf stack-slots))))))
+                
+                ;; Offset négatif relatif à $FP (car on pousse vers le bas)
+                (let ((fp-offset (* -4 (+ stack-slots 1))))
+                  ;; Ajouter la variable avec offset relatif à $FP
+                  (add-variable new-env var (cons :frame fp-offset))
+                  (incf stack-slots)))))))
     
     ;; ÉTAPE 2 : Compiler le body dans le NOUVEL environnement
     (dolist (expr body)
@@ -1479,79 +1512,68 @@ qui a défini la fonction, ou NIL si non trouvée."
 
 (defun compile-dolist (var list-expr body env)
   "Compile (dolist (var list-expr) body...)
-   PHASE 11 Sprint 2.2 - Itération sur listes
+   PHASE LOADER - Itération sur listes avec handles
    
-   Utilise $S1 pour temp-list et $S2 pour var (callee-saved registers)
-   Similaire à DOTIMES mais avec navigation CAR/CDR/NULL"
+   Utilise les primitives LIST-CAR/LIST-CDR avec système de handles
+   Version adaptée pour listes stockées dans *vm-lisp-objects*"
   (let* ((label-start (gen-label env "DOLIST_START"))
          (label-end (gen-label env "DOLIST_END"))
          (code '()))
     
-    ;; 1. Sauvegarder $s1 et $s2 sur pile
+    ;; 1. Sauvegarder $s1 et $s2 sur pile (temp-list et var)
     (setf code (append code
                       (list (list :ADDI *reg-sp* -8 *reg-sp*)
                             (list :SW *reg-s1* *reg-sp* 0)
                             (list :SW *reg-s2* *reg-sp* 4))))
     
-    ;; 2. Sauvegarder $t0-$t3 (pour préserver variables parent)
-    (setf code (append code
-                      (list (list :ADDI *reg-sp* -16 *reg-sp*)
-                            (list :SW *reg-t0* *reg-sp* 0)
-                            (list :SW *reg-t1* *reg-sp* 4)
-                            (list :SW *reg-t2* *reg-sp* 8)
-                            (list :SW *reg-t3* *reg-sp* 12))))
-    
-    ;; 3. Évaluer list-expr AVANT de créer nouvel environnement
+    ;; 2. Évaluer list-expr → $V0 (peut être un handle)
     (setf code (append code (compile-expr list-expr env)))
     
-    ;; 4. Stocker résultat dans $s1 (temp-list)
+    ;; 3. Stocker le handle/liste dans $S1 (temp-list)
     (setf code (append code (list (list :MOVE *reg-v0* *reg-s1*))))
     
-    ;; 5. Restaurer $t0-$t3
-    (setf code (append code
-                      (list (list :LW *reg-t0* *reg-sp* 0)
-                            (list :LW *reg-t1* *reg-sp* 4)
-                            (list :LW *reg-t2* *reg-sp* 8)
-                            (list :LW *reg-t3* *reg-sp* 12)
-                            (list :ADDI *reg-sp* 16 *reg-sp*))))
-    
-    ;; 6. Créer nouvel environnement pour le body
+    ;; 4. Créer nouvel environnement pour le body
     (let ((new-env (copy-env env)))
       
-      ;; 7. Label début de boucle
+      ;; 5. Label début de boucle
       (setf code (append code (list (list :LABEL label-start))))
       
-      ;; 8. Tester si temp-list ($s1) est NULL
-      (setf code (append code (list (list :BEQ *reg-s1* *reg-zero* label-end))))
+      ;; 6. Tester si temp-list est vide avec TYPE-CHECK consp
+      (setf code (append code (list (list :MOVE *reg-s1* *reg-v0*))))
+      (setf code (append code (list (list :TYPE-CHECK 'consp *reg-v0*))))
+      ;; Si 0 (pas consp), sortir
+      (setf code (append code (list (list :BEQ *reg-v0* *reg-zero* label-end))))
       
-      ;; 9. Extraire var = (car temp-list)
-      ;; CAR = charger mot 0 de $s1
-      (setf code (append code (list (list :LW *reg-s2* *reg-s1* 0))))
+      ;; 7. Extraire var = (car temp-list) avec LIST-CAR
+      (setf code (append code (list (list :MOVE *reg-s1* *reg-v0*))))
+      (setf code (append code (list (list :LIST-CAR *reg-v0*))))
+      (setf code (append code (list (list :MOVE *reg-v0* *reg-s2*))))
       
-      ;; 10. Ajouter var à l'environnement (dans registre $s2)
+      ;; 8. Ajouter var à l'environnement (dans registre $S2)
       (add-variable new-env var *reg-s2*)
       
-      ;; 11. Exécuter le body
+      ;; 9. Exécuter le body
       (dolist (expr body)
         (setf code (append code (compile-expr expr new-env))))
       
-      ;; 12. Avancer temp-list: temp-list = (cdr temp-list)
-      ;; CDR = charger mot 1 de $s1
-      (setf code (append code (list (list :LW *reg-s1* *reg-s1* 1))))
+      ;; 10. Avancer temp-list: temp-list = (cdr temp-list) avec LIST-CDR
+      (setf code (append code (list (list :MOVE *reg-s1* *reg-v0*))))
+      (setf code (append code (list (list :LIST-CDR *reg-v0*))))
+      (setf code (append code (list (list :MOVE *reg-v0* *reg-s1*))))
       
-      ;; 13. Retour au début
+      ;; 11. Retour au début
       (setf code (append code (list (list :J label-start))))
       
-      ;; 14. Label fin
+      ;; 12. Label fin
       (setf code (append code (list (list :LABEL label-end))))
       
-      ;; 15. Restaurer $s1 et $s2
+      ;; 13. Restaurer $S1 et $S2
       (setf code (append code
                         (list (list :LW *reg-s1* *reg-sp* 0)
                               (list :LW *reg-s2* *reg-sp* 4)
                               (list :ADDI *reg-sp* 8 *reg-sp*))))
       
-      ;; 16. DOLIST retourne NIL
+      ;; 14. DOLIST retourne NIL
       (setf code (append code (list (list :MOVE *reg-zero* *reg-v0*))))
       
       code)))
@@ -1890,6 +1912,12 @@ qui a défini la fonction, ou NIL si non trouvée."
              (let ((offset (cdr location)))
                (setf code (append code
                                  (list (list :SW *reg-v0* *reg-sp* offset))))))
+            
+            ;; Cas 2bis : Variable sur la pile avec offset depuis FP (let avec pile)
+            ((and location (consp location) (eq (car location) :frame))
+             (let ((offset (cdr location)))
+               (setf code (append code
+                                 (list (list :SW *reg-v0* *reg-fp* offset))))))
             
             ;; Cas 3 : Variable non trouvée
             (t
@@ -2360,6 +2388,28 @@ qui a défini la fonction, ou NIL si non trouvée."
     (get-reg (compile-get-reg-prim args env))
     (set-register (compile-set-register-prim args env))
     (get-register (compile-get-register-prim args env))
+    ;; Hash-tables
+    (vm-make-hash-table (compile-make-hash-table-prim args env))
+    (vm-gethash (compile-gethash-prim args env))
+    (vm-hash-set (compile-hash-set-prim args env))
+    (vm-hash-table-count (compile-hash-table-count-prim args env))
+    (vm-hash-has-key (compile-hash-has-key-prim args env))
+    (vm-maphash (compile-maphash-prim args env))
+    ;; Prédicats de type
+    (vm-listp (compile-type-predicate-prim 'listp args env))
+    (vm-symbolp (compile-type-predicate-prim 'symbolp args env))
+    (vm-keywordp (compile-type-predicate-prim 'keywordp args env))
+    (vm-consp (compile-type-predicate-prim 'consp args env))
+    (vm-atom (compile-type-predicate-prim 'atom args env))
+    ;; Opérations sur listes
+    (vm-first (compile-list-accessor-prim 'first args env))
+    (vm-second (compile-list-accessor-prim 'second args env))
+    (vm-car (compile-list-accessor-prim 'car args env))
+    (vm-cdr (compile-list-accessor-prim 'cdr args env))
+    (vm-rest (compile-list-accessor-prim 'rest args env))
+    (vm-cons (compile-cons-prim args env))
+    (vm-cadr (compile-list-cadr-prim args env))
+    (vm-equal (compile-equal-prim args env))
     (t (error "Primitive VM inconnue: ~A" name))))
 
 (defun compile-mem-write-prim (args env)
@@ -2375,13 +2425,18 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     ;; 1. Compiler adresse → $V0
     (setf code (append code (compile-expr addr-expr env)))
-    ;; Sauvegarder adresse dans $T0
-    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    ;; Sauvegarder adresse sur la pile (car compile-expr value-expr peut utiliser $T0)
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
     
     ;; 2. Compiler valeur → $V0
     (setf code (append code (compile-expr value-expr env)))
     
-    ;; 3. SW $V0, 0($T0) : mémoire[$T0] ← $V0
+    ;; 3. Récupérer l'adresse dans $T0
+    (setf code (append code (list (list :LW *reg-t0* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. SW $V0, 0($T0) : mémoire[$T0] ← $V0
     (setf code (append code (list (list :SW *reg-v0* *reg-t0* 0))))
     
     code))
@@ -2971,6 +3026,9 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:defconstant
        (compile-defconstant (second parsed) (third parsed) env))
       
+      (:defstruct
+       (compile-defstruct (second parsed) (third parsed) env))
+      
       (:defvar
        (compile-defvar (second parsed) (third parsed) env))
       
@@ -3045,6 +3103,40 @@ qui a défini la fonction, ou NIL si non trouvée."
     (setf (gethash name *global-constants*) computed-value)
     ;; Ne générer aucun code MIPS (les constantes sont substituées inline)
     '()))
+
+(defun compile-defstruct (struct-name slots env)
+  "Compile (defstruct nom slot1 slot2 ...).
+   BOOTSTRAPPING: Délégation à Lisp via vm-defstruct.
+   
+   Génère du code MIPS qui appelle la primitive VM vm-defstruct pour
+   enregistrer la définition de structure.
+   
+   Exemple:
+     (defstruct point x y)
+   
+   Génère du code qui appelle:
+     (vm-defstruct vm 'POINT '(X Y))
+   
+   Retourne: code MIPS pour l'appel à vm-defstruct"
+  (declare (ignore env))
+  ;; Pour l'instant, on génère juste un appel à la primitive VM
+  ;; Ceci sera appelé au chargement du code dans la VM
+  
+  ;; Créer la liste des symboles de slots (quotés)
+  (let ((code '()))
+    ;; En pratique, pour compiler defstruct, on doit générer du code
+    ;; qui sera exécuté au chargement. Pour l'instant, on ne génère rien
+    ;; et on suppose que vm-defstruct est appelé manuellement avant.
+    
+    ;; TODO: Générer du code d'initialisation qui appelle vm-defstruct
+    ;; Pour l'instant: pas de code généré, la définition doit être faite
+    ;; manuellement dans l'environnement d'exécution
+    
+    (format t "  DEFSTRUCT ~A avec slots ~A (définition déléguée à l'environnement)~%" 
+            struct-name slots)
+    
+    ;; Ne génère pas de code - la structure sera définie dans l'environnement VM
+    code))
 
 (defun compile-defvar (name value env)
   "Compile (defvar *nom* valeur).
@@ -3483,6 +3575,231 @@ qui a défini la fonction, ou NIL si non trouvée."
     ;; Enregistrer la fonction dans l'environnement
     ;; Format: (name . label) où label est le symbole utilisé pour :JAL
     (push (cons name func-label) (compiler-env-functions env))
+    
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - PRIMITIVES HASH-TABLE (PHASE LOADER)
+;;; ============================================================================
+
+(defun compile-make-hash-table-prim (args env)
+  "Compile (make-hash-table :test 'equal) → HASH-MAKE
+   Crée une hash-table, la VM délègue à Lisp et retourne un handle dans $V0"
+  (let ((code '()))
+    ;; Chercher :test dans args (format: (:test value))
+    ;; Pour simplifier, on met toujours 'eq dans $V0
+    ;; La VM choisira le bon test en fonction de la valeur
+    (setf code (append code (list (list :LI 0 *reg-v0*))))  ; 0 = 'eq par défaut
+    
+    ;; Si args contient :test, le traiter
+    (when (and args (eq (first args) :test))
+      (let ((test-expr (second args)))
+        ;; test-expr est normalement une quote: 'equal ou 'eq
+        (when (and (listp test-expr) (eq (first test-expr) 'quote))
+          (let ((test-symbol (second test-expr)))
+            (cond
+              ((eq test-symbol 'equal) 
+               (setf code (list (list :LI 1 *reg-v0*))))  ; 1 = 'equal
+              ((eq test-symbol 'eq)
+               (setf code (list (list :LI 0 *reg-v0*)))))))  ; 0 = 'eq
+        ))
+    
+    ;; Instruction spéciale: créer hash-table
+    (setf code (append code (list (list :HASH-MAKE *reg-v0*))))
+    code))
+
+(defun compile-gethash-prim (args env)
+  "Compile (gethash key table) → HASH-GET
+   Retourne la valeur associée à key dans $V0 (0 si absent)"
+  (let ((key-expr (first args))
+        (table-expr (second args))
+        (code '()))
+    ;; 1. Compiler la clé → $V0
+    (setf code (append code (compile-expr key-expr env)))
+    ;; Sauvegarder clé sur la pile
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler la table → $V0
+    (setf code (append code (compile-expr table-expr env)))
+    ;; Sauvegarder table dans $T0
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t0*))))
+    
+    ;; 3. Récupérer la clé dans $T1
+    (setf code (append code (list (list :LW *reg-t1* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; 4. HASH-GET: table=$T0, key=$T1, résultat→$V0
+    (setf code (append code (list (list :HASH-GET *reg-t0* *reg-t1*))))
+    
+    code))
+
+(defun compile-hash-set-prim (args env)
+  "Compile (hash-set table key value) → HASH-SET
+   Stocke value dans table[key]"
+  (let ((table-expr (first args))
+        (key-expr (second args))
+        (value-expr (third args))
+        (code '()))
+    ;; 1. Compiler table → $V0
+    (setf code (append code (compile-expr table-expr env)))
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 2. Compiler key → $V0
+    (setf code (append code (compile-expr key-expr env)))
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; 3. Compiler value → $V0
+    (setf code (append code (compile-expr value-expr env)))
+    ;; value déjà dans $V0
+    
+    ;; 4. Récupérer table dans $T0, key dans $T1
+    ;; table est à $SP+4, key est à $SP+0
+    (setf code (append code (list (list :LW *reg-t0* *reg-sp* 4))))
+    (setf code (append code (list (list :LW *reg-t1* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 8 *reg-sp*))))
+    
+    ;; 5. HASH-SET: table=$T0, key=$T1, value=$V0
+    (setf code (append code (list (list :HASH-SET *reg-t0* *reg-t1* *reg-v0*))))
+    
+    code))
+
+(defun compile-hash-table-count-prim (args env)
+  "Compile (hash-table-count table) → HASH-COUNT
+   Retourne le nombre d'entrées dans $V0"
+  (let ((table-expr (first args))
+        (code '()))
+    (setf code (append code (compile-expr table-expr env)))
+    (setf code (append code (list (list :HASH-COUNT *reg-v0*))))
+    code))
+
+(defun compile-hash-has-key-prim (args env)
+  "Compile (hash-has-key table key) → HASH-HAS-KEY
+   Retourne 1 si la clé existe, 0 sinon"
+  (let ((table-expr (first args))
+        (key-expr (second args))
+        (code '()))
+    ;; Compiler table
+    (setf code (append code (compile-expr table-expr env)))
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; Compiler key
+    (setf code (append code (compile-expr key-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t1*))))
+    
+    ;; Récupérer table
+    (setf code (append code (list (list :LW *reg-t0* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; HASH-HAS-KEY
+    (setf code (append code (list (list :HASH-HAS-KEY *reg-t0* *reg-t1*))))
+    
+    code))
+
+(defun compile-maphash-prim (args env)
+  "Compile (maphash func table) → HASH-FOREACH
+   Itère sur chaque paire (key, value) de la table"
+  (let ((func-expr (first args))
+        (table-expr (second args))
+        (code '()))
+    ;; Pour l'instant, erreur: maphash trop complexe pour compilation directe
+    ;; Il faudrait supporter les closures passées en paramètre
+    (error "MAPHASH pas encore supporté en compilation - utiliser une boucle while + conversion liste")))
+
+;;; ============================================================================
+;;; COMPILATION - PRIMITIVES PRÉDICATS DE TYPE
+;;; ============================================================================
+
+(defun compile-type-predicate-prim (predicate args env)
+  "Compile les prédicats de type: listp, symbolp, etc.
+   Délègue à la VM qui vérifie le type et retourne 1/0"
+  (let ((expr (first args))
+        (code '()))
+    (setf code (append code (compile-expr expr env)))
+    (setf code (append code (list (list :TYPE-CHECK predicate *reg-v0*))))
+    code))
+
+;;; ============================================================================
+;;; COMPILATION - PRIMITIVES LISTES
+;;; ============================================================================
+
+(defun compile-list-accessor-prim (accessor args env)
+  "Compile les accesseurs de listes: car, cdr, first, second, rest"
+  (let ((expr (first args))
+        (code '()))
+    (setf code (append code (compile-expr expr env)))
+    (case accessor
+      ((car first) 
+       (setf code (append code (list (list :LIST-CAR *reg-v0*)))))
+      ((cdr rest)
+       (setf code (append code (list (list :LIST-CDR *reg-v0*)))))
+      (second
+       ;; second = car (cdr x)
+       (setf code (append code (list (list :LIST-CDR *reg-v0*))))
+       (setf code (append code (list (list :LIST-CAR *reg-v0*))))))
+    code))
+
+(defun compile-cons-prim (args env)
+  "Compile (cons a b) → LIST-CONS
+   Crée une paire (cons cell)"
+  (let ((car-expr (first args))
+        (cdr-expr (second args))
+        (code '()))
+    ;; Compiler car
+    (setf code (append code (compile-expr car-expr env)))
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; Compiler cdr
+    (setf code (append code (compile-expr cdr-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t1*))))
+    
+    ;; Récupérer car
+    (setf code (append code (list (list :LW *reg-t0* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; LIST-CONS: car=$T0, cdr=$T1, résultat→$V0
+    (setf code (append code (list (list :LIST-CONS *reg-t0* *reg-t1*))))
+    
+    code))
+
+(defun compile-list-cadr-prim (args env)
+  "Compile (vm-cadr lst) → LIST-CADR
+   Extrait le second élément d'une liste (car (cdr lst))"
+  (let ((list-expr (first args))
+        (code '()))
+    ;; Compiler l'expression liste → $V0
+    (setf code (append code (compile-expr list-expr env)))
+    
+    ;; LIST-CADR: liste=$V0, résultat→$V0
+    (setf code (append code (list (list :LIST-CADR *reg-v0*))))
+    
+    code))
+
+(defun compile-equal-prim (args env)
+  "Compile (vm-equal a b) → EQUAL
+   Compare deux valeurs (avec déréférencement automatique de handles)"
+  (let ((val1-expr (first args))
+        (val2-expr (second args))
+        (code '()))
+    ;; Compiler première valeur → $V0
+    (setf code (append code (compile-expr val1-expr env)))
+    (setf code (append code (list (list :ADDI *reg-sp* -4 *reg-sp*))))
+    (setf code (append code (list (list :SW *reg-v0* *reg-sp* 0))))
+    
+    ;; Compiler deuxième valeur → $V0
+    (setf code (append code (compile-expr val2-expr env)))
+    (setf code (append code (list (list :MOVE *reg-v0* *reg-t1*))))
+    
+    ;; Récupérer première valeur
+    (setf code (append code (list (list :LW *reg-t0* *reg-sp* 0))))
+    (setf code (append code (list (list :ADDI *reg-sp* 4 *reg-sp*))))
+    
+    ;; EQUAL: val1=$T0, val2=$T1, résultat→$V0 (1=égal, 0=différent)
+    (setf code (append code (list (list :EQUAL *reg-t0* *reg-t1*))))
     
     code))
 

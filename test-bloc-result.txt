@@ -1,0 +1,222 @@
+
+╔══════════════════════════════════════════════════════════════════╗
+║     TEST : CHARGEMENT EN BLOC DU LOADER + FIBONACCI             ║
+║     (Tout le fichier compilé et chargé d'un coup)                ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ÉTAPE 1/5 : Chargement de l'infrastructure
+═══════════════════════════════════════════════════════════════════
+  ✓ asm-ops.lisp
+         de la boucle.
+  ✓ vm.lisp
+         /home/etudiant/Bureau/CLisp/TD
+         LISP-20251009/VirtualMachine_CLISP/src/loader.lisp, was defined in
+         /home/etudiant/Bureau/CLisp/TD
+         LISP-20251009/VirtualMachine_CLISP/src/vm.lisp
+         de la boucle.
+  ✓ loader.lisp
+
+Compilateur LISP → MIPS chargé.
+Fonctions disponibles:
+  - (compile-lisp expr) : Compile une expression LISP
+  - (compile-and-run expr) : Compile et exécute
+
+Pour les tests, charger: (load "test-compiler.lisp")
+
+  ✓ compiler.lisp
+  ✓ vm-primitives-stubs.lisp
+  ✓ compile-file.lisp
+
+ÉTAPE 2/5 : Compilation et chargement EN BLOC du loader
+═══════════════════════════════════════════════════════════════════
+  → Création de la VM...
+  ✓ VM créée
+
+  → Compilation et chargement de src/loader-compilable.lisp...
+
+
+═══════════════════════════════════════════════════════════════════
+Compilation de src/loader-compilable.lisp en bloc
+═══════════════════════════════════════════════════════════════════
+
+  → Compilation de COLLECT-LABELS...
+     ✓ 92 instructions (offset 0)
+  → Compilation de RESOLVE-LABELS...
+     ✓ 98 instructions (offset 92)
+  → Compilation de RESOLVE-INSTRUCTION...
+     ✓ 90 instructions (offset 190)
+  → Compilation de REVERSE-LIST...
+     ✓ 44 instructions (offset 280)
+  → Compilation de NORMALIZE-INSTRUCTION...
+     ✓ 9 instructions (offset 324)
+  → Compilation de NORMALIZE-CODE...
+     ✓ 72 instructions (offset 333)
+  → Compilation de PREPROCESS-CODE...
+     ✓ 78 instructions (offset 405)
+  → Compilation de LOAD-CODE-COMPILABLE...
+     ✓ 79 instructions (offset 483)
+
+  ✅ Total: 8 fonctions, 562 instructions en bloc
+
+Variables globales créées pour chaque fonction.
+
+  → Chargement du bloc complet dans la VM...
+  ✓ 562 instructions chargées à l'adresse 10480760
+
+  Adresses des fonctions:
+     • COLLECT-LABELS : 10480760
+     • RESOLVE-LABELS : 10480852
+     • RESOLVE-INSTRUCTION : 10480950
+     • REVERSE-LIST : 10481040
+     • NORMALIZE-INSTRUCTION : 10481084
+     • NORMALIZE-CODE : 10481093
+     • PREPROCESS-CODE : 10481165
+     • LOAD-CODE-COMPILABLE : 10481243
+
+  ✅ Loader chargé en un seul bloc!
+     Base : 10480760
+     Fin  : 10481322
+     Total: 562 instructions
+
+ÉTAPE 3/5 : Compilation de fibonacci
+═══════════════════════════════════════════════════════════════════
+  → Compilation de fibonacci(20)...
+  ✓ Fibonacci compilé : 97 instructions
+
+ÉTAPE 4/5 : Chargement et exécution de fibonacci
+═══════════════════════════════════════════════════════════════════
+  → Compilation de simple-loader...
+  ✓ Simple-loader chargé à 10481322 (66 inst)
+
+  → Prétraitement de fibonacci...
+     Labels trouvés : 4
+  ✓ Code prétraité en zone données (10481500)
+
+  → Création du bootstrap...
+  ✓ Bootstrap créé à 10481388
+  ✓ $PC initialisé
+
+  → Exécution de fibonacci(20)...
+     (Cela peut prendre 1-2 minutes)
+
+
+ERREUR: Instruction nulle à $pc=10481322
+
+=== REGISTRES ===
+$ZERO : 0
+$AT   : 0
+$V0   : 0
+$V1   : 0
+$A0   : 10482000
+$A1   : 10481500
+$A2   : 97
+$A3   : 0
+$T0   : 0
+$T1   : 0
+$T2   : 0
+$T3   : 0
+$T4   : 0
+$T5   : 0
+$T6   : 0
+$T7   : 0
+$S0   : 0
+$S1   : 0
+$S2   : 0
+$S3   : 0
+$S4   : 0
+$S5   : 0
+$S6   : 0
+$S7   : 0
+$T8   : 0
+$T9   : 0
+$K0   : 0
+$K1   : 0
+$GP   : 21
+$SP   : 10480759
+$FP   : 10480759
+$RA   : 10481392
+$PC   : 10481322
+$HI   : 0
+$LO   : 0
+$GT   : 0
+$LT   : 0
+$EQ   : 0
+R0    : 0
+R1    : 0
+R2    : 0
+MEM   : 0
+GT    : 0
+LT    : 0
+EQ    : 0
+PL    : 10481322
+FP    : 10480759
+SP    : 10480759
+HP    : 21
+
+=== PILE (sommet 10 éléments) ===
+$sp+1 (10480760): (ADDI $SP -16 $SP)
+$sp+2 (10480761): (SW $RA $SP 0)
+$sp+3 (10480762): (SW $A0 $SP 4)
+$sp+4 (10480763): (LW $S0 $SP 4)
+$sp+5 (10480764): (SW $A1 $SP 8)
+$sp+6 (10480765): (LW $S1 $SP 8)
+$sp+7 (10480766): (SW $A2 $SP 12)
+$sp+8 (10480767): (LW $S2 $SP 12)
+$sp+9 (10480768): (LI 0 $V0)
+$sp+10 (10480769): (MOVE $SP $FP)
+  ✓ Exécution terminée
+     Résultat : 0
+     Instructions : 4
+     Temps : 0.00 secondes
+
+ÉTAPE 5/5 : Vérification du résultat
+═══════════════════════════════════════════════════════════════════
+
+╔══════════════════════════════════════════════════════════════════╗
+║                      RÉSULTAT FINAL                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║                                                                  ║
+║  fibonacci(20) = 0                          ║
+║  Attendu       = 6765                       ║
+║                                                                  ║
+║  ╔════════════════════════════════════════════════════════╗  ║
+║  ║           ✗✗✗ TEST ÉCHOUÉ! ✗✗✗                         ║  ║
+║  ║  Résultat incorrect!                                  ║  ║
+║  ╚════════════════════════════════════════════════════════╝  ║
+║                                                                  ║
+╠══════════════════════════════════════════════════════════════════╣
+║  Chargement EN BLOC:                                             ║
+║                                                                  ║
+║  ✅ Loader compilé en bloc   : 10480760 → 10481322 ║
+║     Total instructions       : 562  ║
+║                                                                  ║
+║  Adresses des fonctions du loader:                               ║
+║    • COLLECT-LABELS         : 10480760 ║
+║    • RESOLVE-LABELS         : 10480852 ║
+║    • RESOLVE-INSTRUCTION    : 10480950 ║
+║    • REVERSE-LIST           : 10481040 ║
+║    • NORMALIZE-INSTRUCTION  : 10481084 ║
+║    • NORMALIZE-CODE         : 10481093 ║
+║    • PREPROCESS-CODE        : 10481165 ║
+║    • LOAD-CODE-COMPILABLE   : 10481243 ║
+║                                                                  ║
+║  ✅ Simple-loader            : 10481322 ║
+║  ✅ Fibonacci                : 97 instructions ║
+║                                                                  ║
+║  Performance:                                                    ║
+║    • Instructions VM         : 4    ║
+║    • Temps exécution         : 0.00 s ║
+║    • Temps total             : 0.10 s ║
+║    • Instructions/sec        : 4,784 ║
+╚══════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════
+CONCLUSION
+═══════════════════════════════════════════════════════════════════
+
+✗ TEST ÉCHOUÉ
+
+   Résultat incorrect : 0 (attendu 6765)
+
+Test terminé (0.10 secondes).
+

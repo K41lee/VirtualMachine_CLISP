@@ -44,6 +44,14 @@
     :JAL :JR :JALR :CALL :RET
     ;; Instructions tas dynamique (PHASE 9 CLOSURES)
     :MALLOC :LOAD-HEAP :STORE-HEAP
+    ;; Instructions hash-table (PHASE LOADER)
+    :HASH-MAKE :HASH-GET :HASH-SET :HASH-COUNT :HASH-HAS-KEY
+    ;; Instructions type-checking (PHASE LOADER)
+    :TYPE-CHECK
+    ;; Instructions listes (PHASE LOADER)
+    :LIST-CAR :LIST-CDR :LIST-CONS :LIST-CADR
+    ;; Instructions de comparaison (PHASE LOADER)
+    :EQUAL
     ;; Autres
     :NOP :HALT :LABEL :PRINT :SYSCALL)
   "Liste des opcodes supportés par la VM")
@@ -180,12 +188,18 @@
     ((:NOP :HALT :RET) 0)
     ;; 1 argument
     ((:J :JMP :JAL :JR :JALR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
-      :MFLO :MFHI) 1)
+      :MFLO :MFHI
+      ;; Nouveaux opcodes (PHASE LOADER)
+      :HASH-MAKE :HASH-COUNT :LIST-CAR :LIST-CDR :LIST-CADR) 1)
     ;; 2 arguments
-    ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP :MALLOC) 2)
+    ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP :MALLOC
+      ;; Nouveaux opcodes (PHASE LOADER)
+      :HASH-GET :HASH-HAS-KEY :TYPE-CHECK :LIST-CONS :EQUAL) 2)
     ;; 3 arguments
     ((:ADD :ADDI :SUB :AND :OR :LW :SW :BEQ :BNE :BLT :BGT :SLT
-      :EQ :NE :GT :LT :GE :LE :LOAD-HEAP :STORE-HEAP) 3)
+      :EQ :NE :GT :LT :GE :LE :LOAD-HEAP :STORE-HEAP
+      ;; Nouveaux opcodes (PHASE LOADER)
+      :HASH-SET) 3)
     (t (error "Opcode inconnu: ~A" opcode))))
 
 (defun format-instruction (instr)

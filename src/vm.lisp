@@ -4,6 +4,31 @@
 (load "src/asm-ops.lisp")  ; Charger les opérations depuis src/
 
 ;;; ============================================================================
+;;; GESTION DES HASH-TABLES VM (PHASE LOADER)
+;;; ============================================================================
+
+(defparameter *vm-hash-tables* (make-hash-table)
+  "Mapping: handle (adresse heap fictive) → hash-table Lisp native.
+   Permet au code compilé d'utiliser des hash-tables sans les implémenter en MIPS.")
+
+(defparameter *vm-hash-handle-counter* 1000
+  "Compteur pour générer des handles uniques pour les hash-tables")
+
+(defparameter *vm-lisp-objects* (make-hash-table)
+  "Mapping: handle → objet Lisp (listes, symboles, etc.)
+   Permet au code compilé de manipuler des structures Lisp")
+
+(defparameter *vm-lisp-handle-counter* 5000
+  "Compteur pour générer des handles uniques pour les objets Lisp")
+
+(defun reset-vm-hash-tables ()
+  "Réinitialise les tables de hash-tables et objets Lisp"
+  (clrhash *vm-hash-tables*)
+  (clrhash *vm-lisp-objects*)
+  (setf *vm-hash-handle-counter* 1000)
+  (setf *vm-lisp-handle-counter* 5000))
+
+;;; ============================================================================
 ;;; GESTION DU TAS DYNAMIQUE (PHASE 9 - CLOSURES)
 ;;; ============================================================================
 
@@ -53,6 +78,7 @@
 
 (defun make-new-vm (&key (verbose nil))
   "Crée et initialise une nouvelle VM"
+  (reset-vm-hash-tables)  ; Réinitialiser les tables globales
   (let ((vm (make-vm :verbose verbose)))
     (init-registers vm)
     (init-memory-layout vm)
@@ -90,6 +116,7 @@
   (setf (vm-state vm) :ready)
   (setf (vm-instruction-count vm) 0)
   (reset-heap)
+  (reset-vm-hash-tables)
   (init-registers vm)
   (init-memory-layout vm))
 
@@ -635,6 +662,214 @@
       (:PRINT (let* ((src (first args))
                      (val (get-value vm src)))
                 (format t ">>> ~A~%" val)))
+      
+      ;; ======================================================================
+      ;; INSTRUCTIONS HASH-TABLE (PHASE LOADER)
+      ;; ======================================================================
+      
+      ;; HASH-MAKE: Crée une hash-table
+      ;; Format: (HASH-MAKE test-fn-reg)
+      ;; Effet: $V0 = handle de la hash-table créée
+      (:HASH-MAKE 
+       (let* ((test-fn-reg (first args))
+              (test-fn-val (get-value vm test-fn-reg))
+              ;; test-fn-val: 0='eq, 1='equal
+              (test-fn (if (= test-fn-val 1) 'equal 'eq))
+              (ht (make-hash-table :test test-fn))
+              (handle (incf *vm-hash-handle-counter*)))
+         (setf (gethash handle *vm-hash-tables*) ht)
+         (set-value vm :$v0 handle)
+         (when (vm-verbose vm)
+           (format t "  HASH-MAKE: Créé hash-table avec handle ~A (test=~A)~%" handle test-fn))))
+      
+      ;; HASH-GET: Récupère une valeur dans une hash-table
+      ;; Format: (HASH-GET table-reg key-reg)
+      ;; Effet: $V0 = valeur ou 0 si absent
+      (:HASH-GET
+       (let* ((table-reg (first args))
+              (key-reg (second args))
+              (handle (get-value vm table-reg))
+              (key (get-value vm key-reg))
+              (ht (gethash handle *vm-hash-tables*)))
+         (unless ht
+           (error "HASH-GET: Handle invalide ~A" handle))
+         (let ((value (gethash key ht 0)))  ; 0 par défaut si absent
+           (set-value vm :$v0 value)
+           (when (vm-verbose vm)
+             (format t "  HASH-GET: table[~A] -> ~A~%" key value)))))
+      
+      ;; HASH-SET: Stocke une valeur dans une hash-table
+      ;; Format: (HASH-SET table-reg key-reg value-reg)
+      (:HASH-SET
+       (let* ((table-reg (first args))
+              (key-reg (second args))
+              (value-reg (third args))
+              (handle (get-value vm table-reg))
+              (key (get-value vm key-reg))
+              (value (get-value vm value-reg))
+              (ht (gethash handle *vm-hash-tables*)))
+         (unless ht
+           (error "HASH-SET: Handle invalide ~A" handle))
+         (setf (gethash key ht) value)
+         (when (vm-verbose vm)
+           (format t "  HASH-SET: table[~A] = ~A~%" key value))))
+      
+      ;; HASH-COUNT: Nombre d'entrées dans une hash-table
+      ;; Format: (HASH-COUNT table-reg)
+      ;; Effet: $V0 = nombre d'entrées
+      (:HASH-COUNT
+       (let* ((table-reg (first args))
+              (handle (get-value vm table-reg))
+              (ht (gethash handle *vm-hash-tables*)))
+         (unless ht
+           (error "HASH-COUNT: Handle invalide ~A" handle))
+         (let ((count (hash-table-count ht)))
+           (set-value vm :$v0 count)
+           (when (vm-verbose vm)
+             (format t "  HASH-COUNT: ~A entrées~%" count)))))
+      
+      ;; HASH-HAS-KEY: Vérifie si une clé existe
+      ;; Format: (HASH-HAS-KEY table-reg key-reg)
+      ;; Effet: $V0 = 1 si existe, 0 sinon
+      (:HASH-HAS-KEY
+       (let* ((table-reg (first args))
+              (key-reg (second args))
+              (handle (get-value vm table-reg))
+              (key (get-value vm key-reg))
+              (ht (gethash handle *vm-hash-tables*)))
+         (unless ht
+           (error "HASH-HAS-KEY: Handle invalide ~A" handle))
+         (let ((exists (if (nth-value 1 (gethash key ht)) 1 0)))
+           (set-value vm :$v0 exists)
+           (when (vm-verbose vm)
+             (format t "  HASH-HAS-KEY: clé ~A existe? ~A~%" key exists)))))
+      
+      ;; ======================================================================
+      ;; INSTRUCTIONS PRÉDICATS DE TYPE (PHASE LOADER)
+      ;; ======================================================================
+      
+      ;; TYPE-CHECK: Vérifie le type d'une valeur
+      ;; Format: (TYPE-CHECK predicate value-reg)
+      ;; Effet: $V0 = 1 si vrai, 0 sinon
+      (:TYPE-CHECK
+       (let* ((predicate (first args))
+              (value-reg (second args))
+              (value-raw (get-value vm value-reg))
+              ;; Déréférencer les handles si nécessaire
+              (value (gethash value-raw *vm-lisp-objects* value-raw))
+              (result (case predicate
+                        (listp (if (listp value) 1 0))
+                        (symbolp (if (symbolp value) 1 0))
+                        (keywordp (if (keywordp value) 1 0))
+                        (consp (if (consp value) 1 0))
+                        (atom (if (atom value) 1 0))
+                        (t (error "TYPE-CHECK: Prédicat inconnu ~A" predicate)))))
+         (set-value vm :$v0 result)
+         (when (vm-verbose vm)
+           (format t "  TYPE-CHECK: (~A ~A) -> ~A~%" predicate value result))))
+      
+      ;; ======================================================================
+      ;; INSTRUCTIONS LISTES (PHASE LOADER)
+      ;; ======================================================================
+      
+      ;; LIST-CAR: Récupère le car d'une liste
+      ;; Format: (LIST-CAR list-reg)
+      ;; Effet: $V0 = car de la liste
+      (:LIST-CAR
+       (let* ((list-reg (first args))
+              (list-handle (get-value vm list-reg))
+              (lst (gethash list-handle *vm-lisp-objects* list-handle)))
+         (unless (listp lst)
+           (error "LIST-CAR: ~A n'est pas une liste" lst))
+         (let* ((result (car lst))
+                ;; Si le résultat est une liste/symbole, créer un handle
+                (result-value (if (or (listp result) (symbolp result))
+                                  (let ((handle (incf *vm-lisp-handle-counter*)))
+                                    (setf (gethash handle *vm-lisp-objects*) result)
+                                    handle)
+                                  result)))
+           (set-value vm :$v0 result-value)
+           (when (vm-verbose vm)
+             (format t "  LIST-CAR: ~A -> ~A~%" lst result)))))
+      
+      ;; LIST-CDR: Récupère le cdr d'une liste
+      ;; Format: (LIST-CDR list-reg)
+      ;; Effet: $V0 = cdr de la liste
+      (:LIST-CDR
+       (let* ((list-reg (first args))
+              (list-handle (get-value vm list-reg))
+              (lst (gethash list-handle *vm-lisp-objects* list-handle)))
+         (unless (listp lst)
+           (error "LIST-CDR: ~A n'est pas une liste" lst))
+         (let* ((result (cdr lst))
+                ;; Créer un handle pour le cdr
+                (result-value (if (or (listp result) (symbolp result))
+                                  (let ((handle (incf *vm-lisp-handle-counter*)))
+                                    (setf (gethash handle *vm-lisp-objects*) result)
+                                    handle)
+                                  result)))
+           (set-value vm :$v0 result-value)
+           (when (vm-verbose vm)
+             (format t "  LIST-CDR: ~A -> ~A~%" lst result)))))
+      
+      ;; LIST-CONS: Crée une paire cons
+      ;; Format: (LIST-CONS car-reg cdr-reg)
+      ;; Effet: $V0 = handle de (cons car cdr)
+      (:LIST-CONS
+       (let* ((car-reg (first args))
+              (cdr-reg (second args))
+              (car-val (get-value vm car-reg))
+              (cdr-val (get-value vm cdr-reg))
+              ;; Résoudre les handles si nécessaire
+              (car-obj (gethash car-val *vm-lisp-objects* car-val))
+              (cdr-obj (gethash cdr-val *vm-lisp-objects* cdr-val))
+              (result (cons car-obj cdr-obj))
+              (handle (incf *vm-lisp-handle-counter*)))
+         (setf (gethash handle *vm-lisp-objects*) result)
+         (set-value vm :$v0 handle)
+         (when (vm-verbose vm)
+           (format t "  LIST-CONS: (~A . ~A) -> handle ~A~%" car-obj cdr-obj handle))))
+      
+      ;; LIST-CADR: Récupère le second élément d'une liste (car (cdr ...))
+      ;; Format: (LIST-CADR list-reg)
+      ;; Effet: $V0 = cadr de la liste
+      (:LIST-CADR
+       (let* ((list-reg (first args))
+              (list-handle (get-value vm list-reg))
+              (lst (gethash list-handle *vm-lisp-objects* list-handle)))
+         (unless (listp lst)
+           (error "LIST-CADR: ~A n'est pas une liste" lst))
+         (let* ((result (cadr lst))
+                ;; Si le résultat est une liste/symbole, créer un handle
+                (result-value (if (or (listp result) (symbolp result))
+                                  (let ((handle (incf *vm-lisp-handle-counter*)))
+                                    (setf (gethash handle *vm-lisp-objects*) result)
+                                    handle)
+                                  result)))
+           (set-value vm :$v0 result-value)
+           (when (vm-verbose vm)
+             (format t "  LIST-CADR: ~A -> ~A~%" lst result)))))
+      
+      ;; ======================================================================
+      ;; INSTRUCTIONS DE COMPARAISON (PHASE LOADER)
+      ;; ======================================================================
+      
+      ;; EQUAL: Compare deux valeurs (avec déréférencement de handles)
+      ;; Format: (EQUAL val1-reg val2-reg)
+      ;; Effet: $V0 = 1 si égaux, 0 sinon
+      (:EQUAL
+       (let* ((val1-reg (first args))
+              (val2-reg (second args))
+              (val1-raw (get-value vm val1-reg))
+              (val2-raw (get-value vm val2-reg))
+              ;; Déréférencer les handles si nécessaire
+              (val1 (gethash val1-raw *vm-lisp-objects* val1-raw))
+              (val2 (gethash val2-raw *vm-lisp-objects* val2-raw))
+              ;; Comparer avec equal (fonctionne pour nombres, symboles, keywords, etc.)
+              (result (if (equal val1 val2) 1 0)))
+         (set-value vm :$v0 result)
+         (when (vm-verbose vm)
+           (format t "  EQUAL: ~A = ~A -> ~A~%" val1 val2 result))))
       
       (t (error "Opcode non implémenté: ~A" opcode))))
   

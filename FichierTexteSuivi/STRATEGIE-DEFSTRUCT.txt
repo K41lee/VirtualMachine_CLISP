@@ -1,0 +1,358 @@
+═══════════════════════════════════════════════════════════════════
+STRATÉGIE D'IMPLÉMENTATION DEFSTRUCT POUR AUTO-COMPILATION
+═══════════════════════════════════════════════════════════════════
+
+Date : 28 décembre 2025
+Objectif : Permettre au compilateur de se compiler lui-même
+Statut : Primitives opérationnelles, génération d'accesseurs à implémenter
+
+═══════════════════════════════════════════════════════════════════
+1. APPROCHE GLOBALE : DÉLÉGATION À LISP
+═══════════════════════════════════════════════════════════════════
+
+Contrairement à une implémentation complète de DEFSTRUCT qui générerait
+du code MIPS pour manipuler des structures en mémoire, nous utilisons
+une approche par délégation :
+
+  • Les structures sont stockées côté Lisp dans des hash-tables
+  • Chaque instance a un HANDLE (entier unique) 
+  • Le code compilé manipule les handles via primitives VM
+  • Les primitives (vm-make-struct, vm-struct-get, etc.) font le vrai travail
+
+AVANTAGES :
+  ✓ Implémentation rapide (quelques jours vs plusieurs semaines)
+  ✓ Réutilise l'infrastructure existante (comme hash-tables)
+  ✓ Pas de gestion mémoire complexe côté MIPS
+  ✓ Debugging plus simple (structures visibles en Lisp)
+
+INCONVÉNIENTS :
+  ✗ Performance moindre (appels VM au lieu d'accès mémoire direct)
+  ✗ Dépendance à l'environnement Lisp hôte
+
+Pour le bootstrapping, les avantages l'emportent largement !
+
+═══════════════════════════════════════════════════════════════════
+2. ARCHITECTURE DES PRIMITIVES (DÉJÀ IMPLÉMENTÉE)
+═══════════════════════════════════════════════════════════════════
+
+FICHIER : src/vm-primitives-structs.lisp (240 lignes)
+TESTS   : tests/bootstrapping/test-vm-structs-primitives.lisp (TOUS ✓)
+
+STRUCTURES DE DONNÉES :
+  • *vm-struct-definitions* : hash-table (struct-name → slot-names)
+  • *vm-struct-instances* : hash-table (handle → instance-vector)
+  • *vm-struct-handle-counter* : compteur pour handles uniques
+
+FORMAT D'UNE INSTANCE :
+  Instance = Vecteur [TYPE-NAME SLOT1-VALUE SLOT2-VALUE ...]
+  
+  Exemple : POINT avec X=10, Y=20
+    → #(POINT 10 20)
+
+PRIMITIVES DISPONIBLES :
+  1. (vm-defstruct vm 'POINT '(X Y))
+     → Enregistre la définition
+  
+  2. (vm-make-struct vm 'POINT 'X 10 'Y 20)
+     → Crée instance, retourne handle (ex: 1000)
+  
+  3. (vm-struct-get vm 1000 'X)
+     → Lit valeur du slot X (retourne 10)
+  
+  4. (vm-struct-set vm 1000 'X 30)
+     → Modifie slot X, retourne nouvelle valeur
+  
+  5. (vm-struct-p vm 1000 'POINT)
+     → Teste le type (retourne 1 si POINT, 0 sinon)
+  
+  6. (vm-struct-type vm 1000)
+     → Retourne le nom du type (ex: POINT)
+
+VALIDATION :
+  ✅ 7 tests passent (test-vm-structs-primitives.lisp)
+  ✅ POINT testé (création, lecture, modification)
+  ✅ COMPILER-ENV testé (9 slots)
+  ✅ Multiples instances indépendantes testées
+
+═══════════════════════════════════════════════════════════════════
+3. ACCESSEURS GÉNÉRÉS PAR DEFSTRUCT
+═══════════════════════════════════════════════════════════════════
+
+Quand on écrit :
+  (defstruct point x y)
+
+Common Lisp génère automatiquement :
+  1. Constructeur : (make-point &key x y)
+  2. Prédicat    : (point-p obj)
+  3. Accesseurs  : (point-x obj), (point-y obj)
+  4. Modificateurs : (setf (point-x obj) value)
+
+EXEMPLE D'UTILISATION DANS COMPILER.LISP :
+
+  ;; Définition (ligne 82-92)
+  (defstruct compiler-env
+    (variables '())
+    (functions '())
+    (label-counter (list 0))
+    (temp-regs-available '())
+    (max-temp-regs 3)
+    (stack-offset 0)
+    (parent-env nil)
+    (lexical-depth 0)
+    (parent-lexical nil))
+  
+  ;; Utilisation (ligne 99)
+  (setf (compiler-env-temp-regs-available env) 
+        (list '$t0 '$t1 '$t2))
+  
+  ;; Utilisation (ligne 105)
+  (let ((regs (compiler-env-temp-regs-available env)))
+    ...)
+  
+  ;; Utilisation (ligne 125)
+  (push (cons var location) (compiler-env-variables env))
+
+Le compilateur utilise ~50 fois ces accesseurs !
+
+═══════════════════════════════════════════════════════════════════
+4. STRATÉGIE DE GÉNÉRATION D'ACCESSEURS
+═══════════════════════════════════════════════════════════════════
+
+OPTION A : Génération à la compilation (CHOISIE)
+  • (defstruct point x y) compile en code MIPS qui :
+    1. Appelle vm-defstruct à l'exécution
+    2. Ne génère PAS les accesseurs automatiquement
+  • Les accesseurs doivent être définis explicitement :
+    (defun make-point (&key x y) 
+      (vm-make-struct *vm* 'POINT 'X x 'Y y))
+    (defun point-x (p) 
+      (vm-struct-get *vm* p 'X))
+    (defun (setf point-x) (val p) 
+      (vm-struct-set *vm* p 'X val))
+
+OPTION B : Macroexpansion dans le compilateur
+  • Transformer (defstruct point x y) en :
+    (progn
+      (vm-defstruct *vm* 'POINT '(X Y))
+      (defun make-point ...)
+      (defun point-x ...)
+      ...)
+  • Compiler ensuite ces defun normalement
+
+DÉCISION : Option A pour l'instant
+  • Plus simple à implémenter
+  • Accesseurs définis explicitement dans le code source
+  • Pour compiler le compilateur, on ajoutera les accesseurs manuellement
+
+Pour une implémentation complète, Option B serait préférable.
+
+═══════════════════════════════════════════════════════════════════
+5. ÉTAT ACTUEL DE L'IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════
+
+✅ FAIT :
+  • Primitives VM implémentées (vm-primitives-structs.lisp)
+  • Tests primitives réussis (test-vm-structs-primitives.lisp)
+  • Tests accesseurs manuels réussis (test-defstruct-accessors.lisp)
+  • Parsing de defstruct ajouté au compilateur (ligne 506)
+  • Dispatch vers compile-defstruct (ligne 3029)
+  • Fonction compile-defstruct créée (ligne 3112)
+
+⏳ EN COURS :
+  • compile-defstruct génère message mais pas de code
+  • Accesseurs doivent être définis manuellement
+
+☐ À FAIRE (Option A - Approche pragmatique) :
+  1. Modifier compile-defstruct pour générer appel à vm-defstruct
+  2. Documenter que les accesseurs doivent être écrits manuellement
+  3. Créer template d'accesseurs pour structures courantes
+  4. Ajouter accesseurs manuels pour compiler-env dans compiler.lisp
+
+☐ À FAIRE (Option B - Génération automatique) :
+  1. Créer fonctions de génération d'accesseurs
+  2. Modifier compile-defstruct pour générer defun pour chaque accesseur
+  3. Compiler ces defun comme du code normal
+  4. Tester avec compiler-env
+
+═══════════════════════════════════════════════════════════════════
+6. GÉNÉRATION DE CODE POUR DEFSTRUCT
+═══════════════════════════════════════════════════════════════════
+
+ACTUEL (compile-defstruct, ligne 3112) :
+  • Affiche message de délégation
+  • Retourne '() (pas de code MIPS)
+  • Structure doit être définie manuellement dans l'environnement
+
+AMÉLIORATION PROPOSÉE :
+  • Générer code qui appelle vm-defstruct à l'exécution
+  • Code MIPS :
+    1. Charger nom de structure dans $A0
+    2. Charger liste des slots dans $A1
+    3. Appeler primitive vm-defstruct
+    4. Résultat ignoré (la définition est enregistrée)
+
+PSEUDO-CODE :
+  (defun compile-defstruct (struct-name slots env)
+    (list
+      (list 'COMMENT (format nil "DEFSTRUCT ~A ~A" struct-name slots))
+      ;; Charger struct-name
+      (list 'LI '$A0 (sxhash struct-name))
+      ;; Charger slots (liste)
+      (compile-quote-to-reg slots '$A1 env)
+      ;; Appeler primitive
+      (list 'JAL 'vm_defstruct)
+      ;; Pas de retour utilisé
+      ))
+
+MAIS : Pour le bootstrapping, pas nécessaire !
+  • On peut définir les structures manuellement dans l'environnement VM
+  • Les accesseurs sont plus importants
+
+═══════════════════════════════════════════════════════════════════
+7. PLAN D'ACTION POUR COMPILER LE COMPILATEUR
+═══════════════════════════════════════════════════════════════════
+
+ÉTAPE 1 : Préparation (MAINTENANT)
+  □ Identifier toutes les utilisations de compiler-env
+  □ Créer template d'accesseurs pour compiler-env
+  □ Documenter la convention d'utilisation
+
+ÉTAPE 2 : Implémentation minimale (JOUR 1-2)
+  □ Ajouter définition manuelle de compiler-env dans vm.lisp
+  □ Ajouter accesseurs manuels pour compiler-env
+  □ Tester que (make-compiler-env) fonctionne dans la VM
+  □ Tester que (compiler-env-variables env) fonctionne
+
+ÉTAPE 3 : Test de compilation (JOUR 2-3)
+  □ Compiler une fonction simple utilisant compiler-env
+  □ Vérifier que les appels aux accesseurs sont compilés
+  □ Vérifier l'exécution dans la VM
+
+ÉTAPE 4 : Compilation du compilateur (JOUR 3-5)
+  □ Compiler compiler.lisp (avec accesseurs manuels ajoutés)
+  □ Charger dans la VM
+  □ Tester que le compilateur chargé peut compiler fibonacci
+  □ Succès = jalon majeur du bootstrapping !
+
+═══════════════════════════════════════════════════════════════════
+8. TEMPLATE D'ACCESSEURS POUR COMPILER-ENV
+═══════════════════════════════════════════════════════════════════
+
+À ajouter au début de compiler.lisp (ou dans un fichier séparé) :
+
+;; ═══════════════════════════════════════════════════════════
+;; ACCESSEURS POUR COMPILER-ENV (délégués à VM)
+;; ═══════════════════════════════════════════════════════════
+
+(defun make-compiler-env (&key (variables '())
+                                (functions '())
+                                (label-counter (list 0))
+                                (temp-regs-available '())
+                                (max-temp-regs 3)
+                                (stack-offset 0)
+                                (parent-env nil)
+                                (lexical-depth 0)
+                                (parent-lexical nil))
+  "Constructeur pour COMPILER-ENV."
+  (vm-make-struct *vm* 'COMPILER-ENV
+                  'VARIABLES variables
+                  'FUNCTIONS functions
+                  'LABEL-COUNTER label-counter
+                  'TEMP-REGS-AVAILABLE temp-regs-available
+                  'MAX-TEMP-REGS max-temp-regs
+                  'STACK-OFFSET stack-offset
+                  'PARENT-ENV parent-env
+                  'LEXICAL-DEPTH lexical-depth
+                  'PARENT-LEXICAL parent-lexical))
+
+(defun compiler-env-p (obj)
+  "Prédicat de type pour COMPILER-ENV."
+  (= (vm-struct-p *vm* obj 'COMPILER-ENV) 1))
+
+(defun compiler-env-variables (env)
+  (vm-struct-get *vm* env 'VARIABLES))
+
+(defun (setf compiler-env-variables) (value env)
+  (vm-struct-set *vm* env 'VARIABLES value))
+
+(defun compiler-env-functions (env)
+  (vm-struct-get *vm* env 'FUNCTIONS))
+
+(defun (setf compiler-env-functions) (value env)
+  (vm-struct-set *vm* env 'FUNCTIONS value))
+
+(defun compiler-env-label-counter (env)
+  (vm-struct-get *vm* env 'LABEL-COUNTER))
+
+(defun (setf compiler-env-label-counter) (value env)
+  (vm-struct-set *vm* env 'LABEL-COUNTER value))
+
+(defun compiler-env-temp-regs-available (env)
+  (vm-struct-get *vm* env 'TEMP-REGS-AVAILABLE))
+
+(defun (setf compiler-env-temp-regs-available) (value env)
+  (vm-struct-set *vm* env 'TEMP-REGS-AVAILABLE value))
+
+(defun compiler-env-max-temp-regs (env)
+  (vm-struct-get *vm* env 'MAX-TEMP-REGS))
+
+(defun (setf compiler-env-max-temp-regs) (value env)
+  (vm-struct-set *vm* env 'MAX-TEMP-REGS value))
+
+(defun compiler-env-stack-offset (env)
+  (vm-struct-get *vm* env 'STACK-OFFSET))
+
+(defun (setf compiler-env-stack-offset) (value env)
+  (vm-struct-set *vm* env 'STACK-OFFSET value))
+
+(defun compiler-env-parent-env (env)
+  (vm-struct-get *vm* env 'PARENT-ENV))
+
+(defun (setf compiler-env-parent-env) (value env)
+  (vm-struct-set *vm* env 'PARENT-ENV value))
+
+(defun compiler-env-lexical-depth (env)
+  (vm-struct-get *vm* env 'LEXICAL-DEPTH))
+
+(defun (setf compiler-env-lexical-depth) (value env)
+  (vm-struct-set *vm* env 'LEXICAL-DEPTH value))
+
+(defun compiler-env-parent-lexical (env)
+  (vm-struct-get *vm* env 'PARENT-LEXICAL))
+
+(defun (setf compiler-env-parent-lexical) (value env)
+  (vm-struct-set *vm* env 'PARENT-LEXICAL value))
+
+;; ═══════════════════════════════════════════════════════════
+;; FIN DES ACCESSEURS
+;; ═══════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════════
+9. CONCLUSION ET PROCHAINES ÉTAPES
+═══════════════════════════════════════════════════════════════════
+
+DÉCISION STRATÉGIQUE :
+  • Pour le bootstrapping, on utilise l'Option A (accesseurs manuels)
+  • C'est plus pragmatique et plus rapide
+  • L'Option B (génération automatique) pourra être implémentée plus tard
+
+PROCHAINE ACTION IMMÉDIATE :
+  1. Créer fichier src/compiler-env-accessors.lisp avec les accesseurs
+  2. Modifier compiler.lisp pour utiliser ces accesseurs
+  3. Tester la compilation d'une fonction utilisant compiler-env
+  4. Passer à la construction suivante (LOOP) une fois DEFSTRUCT validé
+
+CRITÈRE DE SUCCÈS POUR DEFSTRUCT :
+  ✓ Primitives opérationnelles (FAIT)
+  ✓ Tests primitives réussis (FAIT)
+  ✓ Tests accesseurs manuels réussis (FAIT)
+  ⏳ Accesseurs pour compiler-env créés (À FAIRE)
+  ⏳ Compilation d'une fonction utilisant compiler-env (À FAIRE)
+  ⏳ Documentation complète (EN COURS)
+
+Une fois ces critères remplis, DEFSTRUCT sera considéré comme
+TERMINÉ et on pourra passer à LOOP (construction suivante).
+
+═══════════════════════════════════════════════════════════════════
+FIN DE LA STRATÉGIE
+═══════════════════════════════════════════════════════════════════

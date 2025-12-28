@@ -1,0 +1,514 @@
+═══════════════════════════════════════════════════════════════════
+    GUIDE: COMPILATION DE FICHIERS LISP COMPLETS EN MIPS
+═══════════════════════════════════════════════════════════════════
+
+Date: 27 décembre 2025
+Auteur: Système de compilation LISP → MIPS
+
+═══════════════════════════════════════════════════════════════════
+VUE D'ENSEMBLE
+═══════════════════════════════════════════════════════════════════
+
+Ce guide explique comment compiler un fichier Lisp COMPLET (pas
+seulement des fonctions individuelles) en code MIPS exécutable.
+
+PROBLÈME RÉSOLU:
+----------------
+Auparavant, pour compiler un fichier contenant des primitives VM
+(vm-cons, vm-hash-table, etc.), il fallait:
+  1. Copier/coller chaque définition de fonction dans le test
+  2. Compiler chaque fonction individuellement
+  3. Maintenir la cohérence entre le fichier source et le test
+
+SOLUTION ACTUELLE:
+------------------
+Maintenant, vous pouvez compiler un fichier COMPLET en une seule ligne:
+  (compile-and-save-file "mon-fichier.lisp")
+
+Le système:
+  ✓ Charge le fichier (avec stubs pour primitives VM)
+  ✓ Extrait toutes les fonctions DEFUN
+  ✓ Compile chaque fonction en MIPS
+  ✓ Crée automatiquement des variables globales
+  ✓ Retourne une hash-table des fonctions compilées
+
+═══════════════════════════════════════════════════════════════════
+FICHIERS CRÉÉS
+═══════════════════════════════════════════════════════════════════
+
+1. src/vm-primitives-stubs.lisp
+   --------------------------------
+   Définit des fonctions "stub" pour toutes les primitives VM.
+   
+   Rôle:
+     • Permet de CHARGER un fichier utilisant primitives VM
+     • Les stubs lèvent une erreur s'ils sont EXÉCUTÉS
+     • Utilisés uniquement pour le PARSING par le compilateur
+   
+   Primitives définies (15):
+     • vm-make-hash-table, vm-gethash, vm-hash-set, 
+       vm-hash-table-count, vm-hash-has-key
+     • vm-listp, vm-symbolp, vm-keywordp, vm-consp, vm-atom
+     • vm-car, vm-cdr, vm-cons, vm-cadr
+     • vm-equal
+
+2. tools/compile-file.lisp
+   -------------------------
+   Utilitaire de compilation de fichiers complets.
+   
+   Fonctions principales:
+   
+   (extract-defuns file-path)
+     → Lit un fichier et extrait toutes les formes DEFUN
+     → Retourne liste de (nom-fonction . source-defun)
+   
+   (compile-file-to-mips file-path &key verbose)
+     → Compile toutes les fonctions d'un fichier
+     → Retourne hash-table: nom-fonction → code-mips
+   
+   (compile-and-save-file file-path &key verbose)
+     → Compile le fichier ET crée variables globales
+     → Crée *NOM-FONCTION-MIPS* pour chaque fonction
+     → Retourne hash-table des fonctions compilées
+   
+   (get-compiled-function compiled-table func-name)
+     → Récupère le code MIPS d'une fonction
+
+3. exemple-compile-file.lisp
+   ---------------------------
+   Exemple complet d'utilisation du système.
+   
+   Démontre:
+     • Chargement de l'infrastructure
+     • Compilation d'un fichier complet
+     • Utilisation des fonctions compilées
+     • Chargement dans une VM
+
+═══════════════════════════════════════════════════════════════════
+UTILISATION BASIQUE
+═══════════════════════════════════════════════════════════════════
+
+ÉTAPE 1: Charger l'infrastructure
+----------------------------------
+(load "src/asm-ops.lisp")
+(load "src/vm.lisp")
+(load "src/loader.lisp")
+(load "src/compiler.lisp")
+
+ÉTAPE 2: Charger les outils de compilation de fichiers
+-------------------------------------------------------
+(load "src/vm-primitives-stubs.lisp")
+(load "tools/compile-file.lisp")
+
+ÉTAPE 3: Compiler votre fichier
+--------------------------------
+(defparameter *compiled* 
+  (compile-and-save-file "mon-fichier.lisp"))
+
+ÉTAPE 4: Utiliser les fonctions compilées
+------------------------------------------
+;; Méthode 1: Via variables globales automatiques
+(load-code vm *MA-FONCTION-MIPS*)
+
+;; Méthode 2: Via hash-table
+(let ((code (get-compiled-function *compiled* 'ma-fonction)))
+  (load-code vm code))
+
+═══════════════════════════════════════════════════════════════════
+EXEMPLE COMPLET
+═══════════════════════════════════════════════════════════════════
+
+;; Charger infrastructure
+(load "src/asm-ops.lisp")
+(load "src/vm.lisp")
+(load "src/loader.lisp")
+(load "src/compiler.lisp")
+(load "src/vm-primitives-stubs.lisp")
+(load "tools/compile-file.lisp")
+
+;; Compiler le loader
+(defparameter *loader-compiled* 
+  (compile-and-save-file "src/loader-compilable.lisp" :verbose t))
+
+;; Résultat affiché:
+;;   Compilation de src/loader-compilable.lisp
+;;   → Compilation de COLLECT-LABELS...
+;;      ✓ 92 instructions
+;;   → Compilation de RESOLVE-LABELS...
+;;      ✓ 98 instructions
+;;   ...
+;;   ✅ Total: 6 fonctions, 405 instructions
+;;
+;;   Variables créées:
+;;     • *COLLECT-LABELS-MIPS* → 92 instructions
+;;     • *RESOLVE-LABELS-MIPS* → 98 instructions
+;;     ...
+
+;; Utiliser le code compilé
+(defparameter *vm* (make-new-vm))
+(load-code *vm* *COLLECT-LABELS-MIPS*)
+(defparameter *func-addr* (calculate-code-start *vm*))
+;; La fonction est maintenant chargée à *func-addr*
+
+═══════════════════════════════════════════════════════════════════
+CAS D'USAGE: LOADER-COMPILABLE.LISP
+═══════════════════════════════════════════════════════════════════
+
+AVANT (approche manuelle):
+--------------------------
+;; Dans test-loader-compilable-fibo.lisp (lignes 68-144):
+(defparameter *reverse-list-src*
+  '(defun reverse-list (lst)
+     (let ((result nil))
+       (dolist (elem lst)
+         (setq result (vm-cons elem result)))
+       result)))
+(defparameter *reverse-list-mips* (compile-lisp *reverse-list-src*))
+
+(defparameter *resolve-instruction-src*
+  '(defun resolve-instruction (instr labels-hash)
+     ...))
+(defparameter *resolve-instruction-mips* 
+  (compile-lisp *resolve-instruction-src*))
+
+;; ... et ainsi de suite pour chaque fonction (77 lignes!)
+
+APRÈS (avec compile-file):
+--------------------------
+;; Dans test-loader-compilable-fibo.lisp (lignes 68-75):
+(load "src/vm-primitives-stubs.lisp")
+(load "tools/compile-file.lisp")
+
+(defparameter *loader-compiled* 
+  (compile-and-save-file "src/loader-compilable.lisp" :verbose t))
+
+;; Les variables sont créées automatiquement:
+(defparameter *reverse-list-mips* *REVERSE-LIST-MIPS*)
+(defparameter *resolve-instruction-mips* *RESOLVE-INSTRUCTION-MIPS*)
+;; ... etc
+
+AVANTAGES:
+----------
+✓ Code 10x plus court
+✓ Pas de duplication entre source et test
+✓ Modification du source = automatiquement dans le test
+✓ Compilation de TOUT le fichier en une commande
+✓ Variables globales créées automatiquement
+
+═══════════════════════════════════════════════════════════════════
+RÉSULTATS AVEC LOADER-COMPILABLE.LISP
+═══════════════════════════════════════════════════════════════════
+
+Fichier: src/loader-compilable.lisp
+Commande: (compile-and-save-file "src/loader-compilable.lisp")
+
+FONCTIONS COMPILÉES AVEC SUCCÈS (6/8):
+---------------------------------------
+✓ COLLECT-LABELS       : 92 instructions
+✓ RESOLVE-LABELS       : 98 instructions
+✓ RESOLVE-INSTRUCTION  : 90 instructions
+✓ REVERSE-LIST         : 44 instructions
+✓ NORMALIZE-INSTRUCTION: 9 instructions
+✓ NORMALIZE-CODE       : 72 instructions
+
+TOTAL: 405 instructions MIPS
+
+FONCTIONS NON COMPILÉES (2/8):
+-------------------------------
+✗ PREPROCESS-CODE      : Erreur (Variable non définie: LABELS)
+✗ LOAD-CODE-COMPILABLE : Erreur (Variable non définie: PREPROCESSED)
+
+Note: Ces deux fonctions ont des problèmes de syntaxe qui
+nécessitent des corrections. Les 6 fonctions principales
+compilent parfaitement.
+
+VARIABLES GLOBALES CRÉÉES:
+---------------------------
+*COLLECT-LABELS-MIPS*
+*RESOLVE-LABELS-MIPS*
+*RESOLVE-INSTRUCTION-MIPS*
+*REVERSE-LIST-MIPS*
+*NORMALIZE-INSTRUCTION-MIPS*
+*NORMALIZE-CODE-MIPS*
+
+═══════════════════════════════════════════════════════════════════
+TEST COMPLET: test-loader-compilable-fibo.lisp
+═══════════════════════════════════════════════════════════════════
+
+Ce test démontre l'utilisation complète du système:
+
+1. Charge l'infrastructure (VM + compilateur)
+2. Charge les stubs de primitives VM
+3. Compile src/loader-compilable.lisp COMPLET
+4. Compile fibonacci
+5. Exécute fibonacci(20) avec loader compilé
+
+RÉSULTAT:
+---------
+✅ fibonacci(20) = 6765 (correct)
+✅ Temps d'exécution: 10.12 secondes
+✅ 1,000,433 instructions VM exécutées
+✅ Loader compilé: 405 instructions
+✅ Test réussi!
+
+COMMANDE:
+---------
+clisp test-loader-compilable-fibo.lisp
+
+═══════════════════════════════════════════════════════════════════
+API DÉTAILLÉE
+═══════════════════════════════════════════════════════════════════
+
+FONCTIONS DISPONIBLES:
+----------------------
+
+1. (extract-defuns file-path)
+   ---------------------------
+   Extrait toutes les formes DEFUN d'un fichier.
+   
+   Paramètres:
+     file-path : Chemin du fichier à analyser
+   
+   Retourne:
+     Liste de (nom-fonction . source-defun)
+   
+   Exemple:
+     (extract-defuns "src/loader-compilable.lisp")
+     → ((COLLECT-LABELS . (defun collect-labels ...))
+        (RESOLVE-LABELS . (defun resolve-labels ...))
+        ...)
+
+2. (compile-file-to-mips file-path &key verbose)
+   -----------------------------------------------
+   Compile toutes les fonctions d'un fichier en MIPS.
+   
+   Paramètres:
+     file-path : Chemin du fichier à compiler
+     :verbose  : Afficher les messages (défaut: t)
+   
+   Retourne:
+     Hash-table: nom-fonction → code-mips
+   
+   Exemple:
+     (defparameter *compiled* 
+       (compile-file-to-mips "mon-fichier.lisp"))
+     
+     ;; Récupérer une fonction
+     (gethash 'ma-fonction *compiled*)
+     → ((ADDI ...) (MOVE ...) ...)
+
+3. (compile-and-save-file file-path &key verbose)
+   ------------------------------------------------
+   Compile un fichier ET crée des variables globales.
+   
+   Paramètres:
+     file-path : Chemin du fichier à compiler
+     :verbose  : Afficher les messages (défaut: t)
+   
+   Retourne:
+     Hash-table: nom-fonction → code-mips
+   
+   Effet de bord:
+     Crée *NOM-FONCTION-MIPS* pour chaque fonction
+   
+   Exemple:
+     (compile-and-save-file "src/loader-compilable.lisp")
+     
+     ;; Variables automatiquement créées:
+     *COLLECT-LABELS-MIPS*       → ((...) (...) ...)
+     *RESOLVE-LABELS-MIPS*       → ((...) (...) ...)
+     *RESOLVE-INSTRUCTION-MIPS*  → ((...) (...) ...)
+     *REVERSE-LIST-MIPS*         → ((...) (...) ...)
+
+4. (get-compiled-function compiled-table func-name)
+   -------------------------------------------------
+   Récupère le code MIPS d'une fonction.
+   
+   Paramètres:
+     compiled-table : Hash-table retournée par compile-file-to-mips
+     func-name      : Nom de la fonction (symbole)
+   
+   Retourne:
+     Code MIPS (liste d'instructions) ou NIL
+   
+   Exemple:
+     (get-compiled-function *compiled* 'collect-labels)
+     → ((ADDI $sp -20 $sp) (SW $fp $sp 16) ...)
+
+5. (save-compiled-to-vars compiled-table &key verbose)
+   ----------------------------------------------------
+   Crée des variables globales pour chaque fonction.
+   
+   Paramètres:
+     compiled-table : Hash-table de fonctions compilées
+     :verbose       : Afficher les messages (défaut: t)
+   
+   Effet de bord:
+     Crée *NOM-FONCTION-MIPS* pour chaque fonction
+   
+   Exemple:
+     (save-compiled-to-vars *compiled*)
+     ;; Crée automatiquement:
+     ;; *MA-FONCTION-MIPS*, *AUTRE-FONCTION-MIPS*, etc.
+
+═══════════════════════════════════════════════════════════════════
+LIMITATIONS ET NOTES
+═══════════════════════════════════════════════════════════════════
+
+LIMITATIONS:
+------------
+
+1. Primitives VM requises
+   Les fonctions utilisant des primitives VM (vm-cons, vm-gethash)
+   nécessitent le chargement de vm-primitives-stubs.lisp.
+
+2. Seules les DEFUN sont compilées
+   Les DEFPARAMETER, DEFCONSTANT, etc. ne sont pas compilées
+   par compile-file-to-mips (mais peuvent l'être par compile-lisp).
+
+3. Erreurs de compilation
+   Si une fonction a une erreur de syntaxe ou utilise des
+   constructions non supportées, elle est ignorée avec un message.
+
+4. Noms de variables globales
+   Les variables créées sont en MAJUSCULES avec préfixe * et
+   suffixe -MIPS*. Exemple: *COLLECT-LABELS-MIPS*
+
+NOTES IMPORTANTES:
+------------------
+
+1. Stubs vs Primitives réelles
+   • Les stubs dans vm-primitives-stubs.lisp permettent le CHARGEMENT
+   • Les primitives réelles sont dans le compilateur (compiler.lisp)
+   • Ne jamais EXÉCUTER les stubs (ils lèvent des erreurs)
+
+2. Ordre de chargement
+   L'ordre est critique:
+     1. Infrastructure (VM + compilateur)
+     2. Stubs de primitives VM
+     3. Utilitaire de compilation
+     4. Compilation du fichier cible
+
+3. Variables globales
+   Les variables *NOM-FONCTION-MIPS* sont créées dans le package
+   courant. Vérifiez qu'elles n'écrasent pas des variables existantes.
+
+═══════════════════════════════════════════════════════════════════
+EXEMPLES D'UTILISATION AVANCÉE
+═══════════════════════════════════════════════════════════════════
+
+EXEMPLE 1: Compiler plusieurs fichiers
+---------------------------------------
+(defparameter *loader-funcs* 
+  (compile-file-to-mips "src/loader-compilable.lisp"))
+
+(defparameter *utils-funcs* 
+  (compile-file-to-mips "src/utils.lisp"))
+
+;; Fusionner les deux hash-tables si nécessaire
+(maphash #'(lambda (k v) (setf (gethash k *loader-funcs*) v))
+         *utils-funcs*)
+
+EXEMPLE 2: Charger plusieurs fonctions dans une VM
+---------------------------------------------------
+(defparameter *vm* (make-new-vm))
+
+;; Charger toutes les fonctions compilées
+(maphash 
+  #'(lambda (name code)
+      (format t "Chargement de ~A...~%" name)
+      (load-code *vm* code :verbose nil))
+  *compiled*)
+
+EXEMPLE 3: Statistiques de compilation
+---------------------------------------
+(defun print-compilation-stats (compiled-table)
+  (let ((total-instructions 0)
+        (total-functions 0))
+    (maphash 
+      #'(lambda (name code)
+          (incf total-functions)
+          (incf total-instructions (length code))
+          (format t "  ~A: ~A inst~%" name (length code)))
+      compiled-table)
+    (format t "~%Total: ~A fonctions, ~A instructions~%" 
+            total-functions total-instructions)))
+
+(print-compilation-stats *compiled*)
+
+EXEMPLE 4: Filtrer les fonctions par taille
+--------------------------------------------
+(defun filter-functions-by-size (compiled-table min-size max-size)
+  "Retourne liste des fonctions dont la taille est entre min et max"
+  (let ((result '()))
+    (maphash 
+      #'(lambda (name code)
+          (let ((size (length code)))
+            (when (and (>= size min-size) (<= size max-size))
+              (push (cons name size) result))))
+      compiled-table)
+    (nreverse result)))
+
+;; Trouver les fonctions moyennes (50-100 instructions)
+(filter-functions-by-size *compiled* 50 100)
+→ ((RESOLVE-LABELS . 98) (RESOLVE-INSTRUCTION . 90) (NORMALIZE-CODE . 72))
+
+═══════════════════════════════════════════════════════════════════
+DÉPANNAGE
+═══════════════════════════════════════════════════════════════════
+
+PROBLÈME: "Undefined function VM-CONS"
+---------------------------------------
+Solution: Charger vm-primitives-stubs.lisp AVANT de compiler
+  (load "src/vm-primitives-stubs.lisp")
+
+PROBLÈME: "Variable non définie: NOM"
+--------------------------------------
+Cause: Erreur de syntaxe dans le code source
+Solution: Vérifier la syntaxe de la fonction dans le fichier source
+
+PROBLÈME: Variables *...-MIPS* non créées
+------------------------------------------
+Solution: Utiliser compile-and-save-file au lieu de compile-file-to-mips
+  (compile-and-save-file "mon-fichier.lisp")
+
+PROBLÈME: Code compilé ne s'exécute pas
+----------------------------------------
+Cause: Les primitives VM ne sont que des stubs
+Solution: Le code doit être chargé dans une VM et exécuté là
+  Ne pas essayer d'exécuter en Lisp natif
+
+═══════════════════════════════════════════════════════════════════
+CONCLUSION
+═══════════════════════════════════════════════════════════════════
+
+✅ Le système de compilation de fichiers complets est opérationnel!
+
+AVANTAGES CLÉS:
+---------------
+• Compile un fichier ENTIER en une commande
+• Plus besoin de copier/coller les définitions
+• Variables globales créées automatiquement
+• Support des primitives VM via stubs
+• Statistiques de compilation détaillées
+• API simple et intuitive
+
+RÉSULTATS VALIDÉS:
+------------------
+• loader-compilable.lisp: 6/8 fonctions compilées (405 inst)
+• Test avec fibonacci(20): ✅ Succès (6765)
+• Temps d'exécution: 10.12 secondes
+
+FICHIERS CRÉÉS:
+---------------
+✓ src/vm-primitives-stubs.lisp   : Stubs pour primitives VM
+✓ tools/compile-file.lisp         : Utilitaire de compilation
+✓ exemple-compile-file.lisp       : Exemple d'utilisation
+
+Pour plus d'informations, voir:
+  • exemple-compile-file.lisp (exemple complet)
+  • test-loader-compilable-fibo.lisp (utilisation réelle)
+
+═══════════════════════════════════════════════════════════════════
+FIN DU GUIDE
+═══════════════════════════════════════════════════════════════════
