@@ -180,17 +180,33 @@
           do (format t "[~4A] ~A~%" addr (format-instruction instr))
              (incf count))))
 
-(defun load-and-run (vm asm-code &key (verbose nil))
-  "Charge et exécute du code assembleur"
-  (load-code vm asm-code :verbose verbose)
-  (when verbose
-    (dump-registers vm)
-    (format t "~%=== DÉBUT DE L'EXÉCUTION ===~%"))
-  (run-vm vm)
-  (when verbose
-    (format t "~%=== FIN DE L'EXÉCUTION ===~%")
-    (dump-registers vm)
-    (dump-stack vm)))
+(defun load-and-run (vm asm-code &key (verbose nil) (include-runtime t))
+  "Charge et exécute du code assembleur.
+   Si include-runtime=T, ajoute automatiquement le runtime pour les listes."
+  ;; Si runtime demandé, le préfixer au code utilisateur
+  (let ((full-code asm-code))
+    (when include-runtime
+      (let* ((runtime-code (generate-list-runtime))
+             (skip-label (gensym "SKIP_RUNTIME"))
+             ;; Ajouter un saut pour éviter d'exécuter le runtime
+             (init-code (list (list :J skip-label)
+                             (list :LABEL skip-label))))
+        ;; Code final : JUMP → RUNTIME → LABEL → USER CODE
+        (setf full-code (append (list (car init-code))
+                               runtime-code
+                               (list (cadr init-code))
+                               asm-code))))
+    
+    ;; Charger le code complet
+    (load-code vm full-code :verbose verbose)
+    (when verbose
+      (dump-registers vm)
+      (format t "~%=== DÉBUT DE L'EXÉCUTION ===~%"))
+    (run-vm vm)
+    (when verbose
+      (format t "~%=== FIN DE L'EXÉCUTION ===~%")
+      (dump-registers vm)
+      (dump-stack vm))))
 
 ;;; ============================================================================
 ;;; EXPORT

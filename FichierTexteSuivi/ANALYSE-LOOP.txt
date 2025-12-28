@@ -1,0 +1,249 @@
+═══════════════════════════════════════════════════════════════════
+ANALYSE : LOOP POUR BOOTSTRAPPING
+═══════════════════════════════════════════════════════════════════
+
+Date : 28 décembre 2025
+Objectif : Implémenter les constructions LOOP utilisées dans compiler.lisp
+Étape : 3/11
+
+═══════════════════════════════════════════════════════════════════
+ANALYSE DES UTILISATIONS DE LOOP DANS COMPILER.LISP
+═══════════════════════════════════════════════════════════════════
+
+PATTERNS TROUVÉS (4 occurrences) :
+
+1. LOOP FOR ... FROM ... TO ... DO
+   Ligne 241 :
+   (loop for i from 1 to depth-diff do
+     (push (list :LW *reg-t3* *reg-t3* 8) code))
+   
+   Usage : Itérer un nombre fixe de fois avec compteur
+
+2. LOOP FOR ... FROM ... BELOW ... DO
+   Ligne 2685 :
+   (loop for i from 0 below num-params
+         for arg in fn-args
+         for arg-reg in arg-regs
+         do (let ((fp-offset (- (* 4 (+ i 1)))))
+              ...))
+   
+   Usage : Itérer avec compteur ET parcourir plusieurs listes en parallèle
+
+3. LOOP FOR ... IN ... DO
+   Ligne 3486 :
+   (loop for arg in args
+         for reg in arg-regs
+         do (let ((arg-code (compile-expr arg env)))
+              ...))
+   
+   Usage : Parcourir deux listes en parallèle
+
+4. LOOP FOR ... IN ... FOR ... FROM ... DO
+   Ligne 3550 :
+   (loop for param in params
+         for i from 0
+         for arg-reg in (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*)
+         for saved-reg in (list *reg-s0* *reg-s1* *reg-s2* *reg-s3*)
+         for offset = (* 4 (+ 1 i))
+         do (progn ...))
+   
+   Usage : Combiner itération de liste, compteur et calculs
+
+═══════════════════════════════════════════════════════════════════
+LOOP DÉJÀ SUPPORTÉ
+═══════════════════════════════════════════════════════════════════
+
+✅ (loop while condition do body)
+   Implémenté à la ligne 335
+   Parse: :loop-while
+   Compile: compile-loop-while (ligne 1446)
+
+═══════════════════════════════════════════════════════════════════
+CONSTRUCTIONS À IMPLÉMENTER
+═══════════════════════════════════════════════════════════════════
+
+PRIORITÉ 1 : Constructions utilisées directement
+  1. ☐ (loop for var from start to end do body)
+  2. ☐ (loop for var from start below end do body)
+  3. ☐ (loop for var in list do body)
+  4. ☐ Clauses FOR multiples en parallèle
+  5. ☐ Clause FOR avec calcul (for var = expr)
+
+PRIORITÉ 2 : Constructions utiles pour le futur
+  6. ☐ (loop for var in list collect expr)
+  7. ☐ (loop for var in list append expr)
+  8. ☐ (loop for var in list when condition do body)
+  9. ☐ (loop for var in list when condition collect expr)
+  10. ☐ (loop ... finally (return value))
+
+═══════════════════════════════════════════════════════════════════
+STRATÉGIE D'IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════
+
+APPROCHE : Transformation en code Lisp simple
+
+Au lieu de compiler LOOP directement en MIPS, on le transforme
+en constructions déjà supportées (LET, WHILE, PROGN, etc).
+
+EXEMPLE 1 : (loop for i from 1 to 10 do body)
+  Transformer en :
+  (let ((i 1))
+    (while (<= i 10)
+      body
+      (setq i (+ i 1))))
+
+EXEMPLE 2 : (loop for x in list do body)
+  Transformer en :
+  (let ((#:list-temp list))
+    (while #:list-temp
+      (let ((x (car #:list-temp)))
+        body
+        (setq #:list-temp (cdr #:list-temp)))))
+
+EXEMPLE 3 : (loop for x in list collect expr)
+  Transformer en :
+  (let ((#:result nil)
+        (#:list-temp list))
+    (while #:list-temp
+      (let ((x (car #:list-temp)))
+        (setq #:result (cons expr #:result))
+        (setq #:list-temp (cdr #:list-temp))))
+    (reverse #:result))
+
+AVANTAGES :
+  ✓ Réutilise le code existant (let, while, setq, etc)
+  ✓ Pas de nouveau code MIPS à générer
+  ✓ Plus simple et plus rapide à implémenter
+  ✓ Facile à déboguer
+
+INCONVÉNIENTS :
+  ✗ Performance moindre (plus d'instructions)
+  ✗ Nécessite gensym pour variables temporaires
+
+Pour le bootstrapping, les avantages l'emportent !
+
+═══════════════════════════════════════════════════════════════════
+PLAN D'IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════
+
+PHASE 1 : Parser LOOP (1 jour)
+  □ Analyser la syntaxe LOOP dans parse-lisp-expr
+  □ Identifier les clauses FOR (from/to/below/in/=)
+  □ Identifier les clauses d'action (do/collect/append/when)
+  □ Retourner structure :loop-for avec toutes les infos
+
+PHASE 2 : Expansion simple (1 jour)
+  □ Implémenter expand-loop-for-from-to
+  □ Implémenter expand-loop-for-from-below
+  □ Implémenter expand-loop-for-in
+  □ Tester les expansions manuellement
+
+PHASE 3 : Expansion avec clauses multiples (1 jour)
+  □ Gérer plusieurs clauses FOR en parallèle
+  □ Gérer clause FOR avec calcul (for var = expr)
+  □ Tester avec cas réels du compilateur
+
+PHASE 4 : Clauses de collection (1 jour)
+  □ Implémenter COLLECT
+  □ Implémenter APPEND
+  □ Implémenter WHEN
+  □ Tester toutes les combinaisons
+
+TOTAL : 4 jours (estimé 3-4 jours)
+
+═══════════════════════════════════════════════════════════════════
+GENSYM POUR VARIABLES TEMPORAIRES
+═══════════════════════════════════════════════════════════════════
+
+PROBLÈME : Les transformations ont besoin de variables temporaires
+           uniques pour éviter les conflits de noms.
+
+SOLUTION : Implémenter gensym simple côté compilation
+
+(defparameter *gensym-counter* 0)
+
+(defun compiler-gensym (&optional (prefix "G"))
+  "Génère un symbole unique pour le compilateur."
+  (incf *gensym-counter*)
+  (intern (format nil "~A~A" prefix *gensym-counter*)))
+
+Exemples :
+  (compiler-gensym "LIST")  → LIST1
+  (compiler-gensym "RESULT") → RESULT2
+  (compiler-gensym)          → G3
+
+═══════════════════════════════════════════════════════════════════
+EXEMPLE COMPLET : TRANSFORMATION
+═══════════════════════════════════════════════════════════════════
+
+CODE ORIGINAL (ligne 3486 du compilateur) :
+  (loop for arg in args
+        for reg in arg-regs
+        do (let ((arg-code (compile-expr arg env)))
+             (setf code (append code
+                               arg-code
+                               (list (list :MOVE *reg-v0* reg))))))
+
+PARSING :
+  (:loop-for
+    :clauses ((:for arg :in args)
+              (:for reg :in arg-regs))
+    :action :do
+    :body ((let ((arg-code (compile-expr arg env)))
+             (setf code ...))))
+
+EXPANSION :
+  (let ((#:list-temp1 args)
+        (#:list-temp2 arg-regs))
+    (while (and #:list-temp1 #:list-temp2)
+      (let ((arg (car #:list-temp1))
+            (reg (car #:list-temp2)))
+        (let ((arg-code (compile-expr arg env)))
+          (setf code (append code
+                            arg-code
+                            (list (list :MOVE *reg-v0* reg)))))
+        (setq #:list-temp1 (cdr #:list-temp1))
+        (setq #:list-temp2 (cdr #:list-temp2)))))
+
+COMPILATION :
+  Le code expansé est ensuite compilé normalement avec
+  compile-expr, qui sait déjà gérer let, while, setq, etc.
+
+═══════════════════════════════════════════════════════════════════
+TESTS À CRÉER
+═══════════════════════════════════════════════════════════════════
+
+1. test-loop-for-from-to.lisp
+   □ (loop for i from 1 to 5 do (print i))
+   □ (loop for i from 0 to 10 do (setq sum (+ sum i)))
+
+2. test-loop-for-from-below.lisp
+   □ (loop for i from 0 below 5 do (print i))
+
+3. test-loop-for-in.lisp
+   □ (loop for x in '(1 2 3) do (print x))
+   □ (loop for x in list for y in list2 do (print (+ x y)))
+
+4. test-loop-collect.lisp
+   □ (loop for i from 1 to 5 collect (* i 2))
+   □ (loop for x in '(1 2 3) collect (* x x))
+
+5. test-loop-when.lisp
+   □ (loop for i from 1 to 10 when (> i 5) collect i)
+
+6. test-loop-compiler-real-cases.lisp
+   □ Tests avec les 4 cas réels du compilateur
+
+═══════════════════════════════════════════════════════════════════
+PROCHAINE ACTION IMMÉDIATE
+═══════════════════════════════════════════════════════════════════
+
+1. Implémenter compiler-gensym
+2. Créer expand-loop-for-from-to
+3. Tester manuellement l'expansion
+4. Intégrer dans le parsing
+5. Tester avec cas simple
+
+═══════════════════════════════════════════════════════════════════
+FIN DE L'ANALYSE
+═══════════════════════════════════════════════════════════════════

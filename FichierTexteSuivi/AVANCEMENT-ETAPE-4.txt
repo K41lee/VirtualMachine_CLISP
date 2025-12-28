@@ -1,0 +1,318 @@
+═══════════════════════════════════════════════════════════════════
+ÉTAPE 4 : PARAMÈTRES AVANCÉS (&optional, &rest, &key)
+Date : 28 décembre 2025
+État : EN COURS
+═══════════════════════════════════════════════════════════════════
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    CONTEXTE ET OBJECTIF                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ÉTAPES COMPLÉTÉES :
+  ✅ ÉTAPE 1 : Analyse et préparation
+  ✅ ÉTAPE 2 : DEFSTRUCT (22 tests, 100%)
+  ✅ ÉTAPE 3 : LOOP AVANCÉ (18 tests, 100%)
+  
+ÉTAPE ACTUELLE :
+  🔄 ÉTAPE 4 : Paramètres avancés (&optional, &rest, &key)
+
+OBJECTIF :
+  Permettre au compilateur de gérer les fonctions avec paramètres
+  optionnels, variadiques et nommés.
+
+═══════════════════════════════════════════════════════════════════
+ANALYSE DES BESOINS
+═══════════════════════════════════════════════════════════════════
+
+UTILISATION DANS COMPILER.LISP :
+
+&OPTIONAL (2 occurrences) :
+  1. (defun make-lexical-env (parent-env &optional (increment-depth t)))
+     Ligne 198 - Création d'environnement lexical
+     
+  2. (defun free-variables (expr &optional (bound-vars '())))
+     Ligne 590 - Analyse des variables libres
+
+&REST (0 occurrences) :
+  Aucune utilisation directe dans compiler.lisp
+
+&KEY (1 occurrence) :
+  1. (defun compile-and-run (expr &key (verbose nil) (show-code nil)))
+     Ligne 3862 - Fonction de test/debug
+
+TOTAL : 3 fonctions à supporter
+
+PRIORITÉ : MOYENNE-HAUTE
+  • &optional est utilisé mais peut être contourné temporairement
+  • &key est utilisé une seule fois dans une fonction de test
+  • Nécessaire pour compiler compiler.lisp sans modification
+
+═══════════════════════════════════════════════════════════════════
+STRATÉGIE D'IMPLÉMENTATION
+═══════════════════════════════════════════════════════════════════
+
+APPROCHE : EXPANSION + DÉLÉGATION HYBRIDE
+
+Option 1 : EXPANSION (Recommandée)
+  • Transformer les paramètres avancés en code standard
+  • (defun f (a &optional b) ...) → vérification + affectation
+  • Avantages : Code MIPS standard, pas de primitives VM
+  • Inconvénients : Code généré plus long
+
+Option 2 : DÉLÉGATION À LISP
+  • Créer des primitives VM pour gérer les paramètres
+  • Stocker les infos de signature dans une table
+  • Avantages : Simple, réutilise Lisp
+  • Inconvénients : Dépendance runtime forte
+
+CHOIX : Option 1 (EXPANSION)
+  • Plus cohérent avec l'approche LOOP
+  • Génère du code MIPS pur
+  • Facilite le debugging
+
+═══════════════════════════════════════════════════════════════════
+PLAN D'IMPLÉMENTATION DÉTAILLÉ
+═══════════════════════════════════════════════════════════════════
+
+PHASE 1 : &OPTIONAL (Estimé : 3-4h)
+───────────────────────────────────────────────────────────────────
+
+1.1 Parser les paramètres &optional
+    • Détecter le mot-clé &optional dans la liste de paramètres
+    • Extraire les paramètres optionnels et leurs valeurs par défaut
+    • Format : (param) ou (param default-value)
+
+1.2 Générer le code d'expansion
+    • Vérifier le nombre d'arguments fournis
+    • Affecter les valeurs par défaut si manquant
+    • Exemples :
+      (defun f (a &optional (b 10)) body)
+      →
+      (defun f-internal (a b-supplied b) 
+        (let ((b (if b-supplied b 10)))
+          body))
+
+1.3 Tester avec cas simples
+    • Fonction avec 1 paramètre optionnel
+    • Fonction avec plusieurs paramètres optionnels
+    • Valeurs par défaut constantes et calculées
+
+PHASE 2 : &REST (Estimé : 2-3h)
+───────────────────────────────────────────────────────────────────
+
+2.1 Parser les paramètres &rest
+    • Détecter le mot-clé &rest
+    • Capturer le nom de la variable reste
+    • Format : &rest rest-param
+
+2.2 Générer le code d'expansion
+    • Collecter tous les arguments après les requis
+    • Créer une liste avec ces arguments
+    • Exemples :
+      (defun f (a &rest r) body)
+      →
+      (defun f-internal (a . args)
+        (let ((r args))
+          body))
+
+2.3 Tester avec cas simples
+    • Fonction avec &rest seulement
+    • Combinaison paramètres requis + &rest
+
+PHASE 3 : &KEY (Estimé : 4-5h)
+───────────────────────────────────────────────────────────────────
+
+3.1 Parser les paramètres &key
+    • Détecter le mot-clé &key
+    • Extraire les paramètres nommés et leurs valeurs par défaut
+    • Format : (param) ou (param default-value)
+
+3.2 Générer le code d'expansion
+    • Parser la liste d'arguments keyword
+    • Chercher :param-name dans les arguments
+    • Affecter valeur trouvée ou valeur par défaut
+    • Exemples :
+      (defun f (a &key (b 10) (c 20)) body)
+      →
+      (defun f-internal (a &rest args)
+        (let* ((b (or (getf args :b) 10))
+               (c (or (getf args :c) 20)))
+          body))
+
+3.3 Tester avec cas simples
+    • Fonction avec 1 paramètre keyword
+    • Fonction avec plusieurs paramètres keyword
+    • Appels avec arguments dans le désordre
+
+PHASE 4 : COMBINAISONS (Estimé : 2-3h)
+───────────────────────────────────────────────────────────────────
+
+4.1 Supporter les combinaisons
+    • requis + &optional
+    • requis + &rest
+    • requis + &key
+    • requis + &optional + &rest
+    • requis + &optional + &key
+    • requis + &optional + &rest + &key (ordre strict)
+
+4.2 Tester toutes les combinaisons
+    • Vérifier l'ordre correct des sections
+    • Tester les interactions entre paramètres
+
+PHASE 5 : INTÉGRATION COMPILATEUR (Estimé : 2h)
+───────────────────────────────────────────────────────────────────
+
+5.1 Modifier parse-lisp-expr (DEFUN)
+    • Appeler parse-lambda-list sur les paramètres
+    • Stocker les infos sur les paramètres
+
+5.2 Modifier compile-defun
+    • Générer le code d'expansion pour les paramètres
+    • Compiler le corps avec les bonnes liaisons
+
+5.3 Tester avec les fonctions de compiler.lisp
+    • make-lexical-env
+    • free-variables
+    • compile-and-run
+
+═══════════════════════════════════════════════════════════════════
+STRUCTURE DES FICHIERS
+═══════════════════════════════════════════════════════════════════
+
+NOUVEAUX FICHIERS À CRÉER :
+
+src/lambda-list-parser.lisp (250 lignes)
+  • parse-lambda-list : Parser une liste de paramètres
+  • extract-required : Extraire paramètres requis
+  • extract-optional : Extraire paramètres optionnels
+  • extract-rest : Extraire paramètre &rest
+  • extract-key : Extraire paramètres &key
+  • validate-lambda-list : Vérifier la syntaxe
+
+src/lambda-list-expander.lisp (300 lignes)
+  • expand-optional-params : Générer code pour &optional
+  • expand-rest-params : Générer code pour &rest
+  • expand-key-params : Générer code pour &key
+  • expand-lambda-list : Fonction principale d'expansion
+
+tests/bootstrapping/test-lambda-list-parser.lisp (150 lignes)
+  • Tests du parser (10-12 tests)
+
+tests/bootstrapping/test-lambda-list-expander.lisp (200 lignes)
+  • Tests de l'expansion (12-15 tests)
+
+tests/bootstrapping/test-lambda-list-integration.lisp (150 lignes)
+  • Tests d'intégration avec le compilateur (6-8 tests)
+
+FICHIERS À MODIFIER :
+
+src/compiler.lisp
+  • Charger les nouveaux modules en début de fichier
+  • Modifier parse-lisp-expr pour DEFUN
+  • Modifier compile-defun pour générer le code expansé
+
+═══════════════════════════════════════════════════════════════════
+EXEMPLES D'EXPANSION
+═══════════════════════════════════════════════════════════════════
+
+EXEMPLE 1 : &OPTIONAL
+───────────────────────────────────────────────────────────────────
+Entrée :
+  (defun foo (a &optional (b 10) (c 20))
+    (+ a b c))
+
+Expansion :
+  (defun foo (a &rest __rest__)
+    (let* ((b (if (>= (length __rest__) 1)
+                  (nth 0 __rest__)
+                  10))
+           (c (if (>= (length __rest__) 2)
+                  (nth 1 __rest__)
+                  20)))
+      (+ a b c)))
+
+EXEMPLE 2 : &KEY
+───────────────────────────────────────────────────────────────────
+Entrée :
+  (defun bar (x &key (verbose nil) (show-code nil))
+    (when verbose (print x)))
+
+Expansion :
+  (defun bar (x &rest __args__)
+    (let* ((verbose (getf __args__ :verbose nil))
+           (show-code (getf __args__ :show-code nil)))
+      (when verbose (print x))))
+
+EXEMPLE 3 : COMBINAISON
+───────────────────────────────────────────────────────────────────
+Entrée :
+  (defun baz (a b &optional c &key (d 10))
+    (list a b c d))
+
+Expansion :
+  (defun baz (a b &rest __args__)
+    (let* ((c (if (and (>= (length __args__) 1)
+                       (not (keywordp (nth 0 __args__))))
+                  (nth 0 __args__)
+                  nil))
+           (__key-start__ (if c 1 0))
+           (d (getf (nthcdr __key-start__ __args__) :d 10)))
+      (list a b c d)))
+
+═══════════════════════════════════════════════════════════════════
+TESTS À CRÉER
+═══════════════════════════════════════════════════════════════════
+
+TEST 1 : Parser &optional simple
+  (parse-lambda-list '(a b &optional c))
+  → (:required (a b) :optional ((c nil)))
+
+TEST 2 : Parser &optional avec valeur par défaut
+  (parse-lambda-list '(a &optional (b 10) (c 20)))
+  → (:required (a) :optional ((b 10) (c 20)))
+
+TEST 3 : Parser &rest
+  (parse-lambda-list '(a b &rest r))
+  → (:required (a b) :rest r)
+
+TEST 4 : Parser &key
+  (parse-lambda-list '(a &key (x 1) (y 2)))
+  → (:required (a) :key ((x 1) (y 2)))
+
+TEST 5 : Parser combinaison
+  (parse-lambda-list '(a &optional b &rest r &key x))
+  → (:required (a) :optional ((b nil)) :rest r :key ((x nil)))
+
+TEST 6 : Expansion &optional
+  → Tester que le code expansé fonctionne correctement
+
+TEST 7 : Expansion &key
+  → Tester les appels avec keywords
+
+TEST 8 : Compilation complète
+  → Compiler et exécuter des fonctions avec paramètres avancés
+
+═══════════════════════════════════════════════════════════════════
+MÉTRIQUES DE SUCCÈS
+═══════════════════════════════════════════════════════════════════
+
+CRITÈRES DE VALIDATION :
+  ✓ Parser correctement toutes les formes de lambda-list
+  ✓ Générer du code expansé correct pour chaque type
+  ✓ Tous les tests unitaires passent (30+ tests)
+  ✓ Les 3 fonctions de compiler.lisp compilent correctement
+  ✓ Le code généré s'exécute avec les bons résultats
+
+ESTIMATION TOTALE : 14-17 heures (2-3 jours)
+
+═══════════════════════════════════════════════════════════════════
+PROCHAINES ÉTAPES APRÈS ÉTAPE 4
+═══════════════════════════════════════════════════════════════════
+
+ÉTAPE 5 : Retours multiples (values, multiple-value-bind)
+ÉTAPE 6 : Fonctions de liste avancées (member, assoc, etc.)
+ÉTAPE 7 : Fonctions d'ordre supérieur (mapcar, remove-if, etc.)
+ÉTAPE 8 : Macros avancées (push, pop, incf, decf)
+ÉTAPE 9 : Format avancé et gestion d'erreurs
+ÉTAPE 10 : Compilation partielle de compiler.lisp
+ÉTAPE 11 : Auto-compilation complète

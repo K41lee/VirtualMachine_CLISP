@@ -9,7 +9,7 @@ Date début : 28 décembre 2025
 
 OBJECTIF : Le compilateur doit pouvoir se compiler lui-même
 
-PROGRESSION GLOBALE : 10% (Étape 2/11 terminée)
+PROGRESSION GLOBALE : 20% (Étapes 2-3 terminées)
 
 TEMPS ESTIMÉ RESTANT : 25-35 jours
 
@@ -25,7 +25,12 @@ PRIORITÉ CRITIQUE (Bloquants)
      • Tests        : ✅ TERMINÉ
      • Accesseurs   : ✅ TERMINÉ (compiler-env-accessors.lisp)
   
-  ❌ loop avancé (À FAIRE)     - for, collect, when, append
+  ✅ loop avancé (TERMINÉ)     - for, from/to/below/in, collect
+     • Parser       : ✅ TERMINÉ (loop-parser.lisp)
+     • Expansions   : ✅ TERMINÉ (loop-expander.lisp)
+     • Intégration  : ✅ TERMINÉ (loop-integration.lisp)
+     • Tests        : ✅ TERMINÉ (12 tests)
+     • Compilation  : ⏳ À FAIRE (intégrer dans compiler.lisp)
   ❌ multiple-value-bind (À FAIRE) - Retours multiples
   ❌ &optional / &rest / &key (À FAIRE) - Paramètres avancés
 

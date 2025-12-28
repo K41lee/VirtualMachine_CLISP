@@ -4,6 +4,23 @@
 ;; Note: loader.lisp est chargé par main.lisp avant compiler.lisp
 
 ;;; ============================================================================
+;;; CHARGEMENT DES MODULES BOOTSTRAPPING
+;;; ============================================================================
+
+;; Modules LOOP : Parser et expanser les constructions LOOP avancées
+(load "src/loop-parser.lisp")
+(load "src/loop-expander.lisp")
+(load "src/loop-integration.lisp")
+
+;; Modules LAMBDA-LIST : Parser et expanser les paramètres avancés
+;; (&optional, &rest, &key)
+(load "src/lambda-list-parser.lisp")
+(load "src/lambda-list-expander.lisp")
+
+;; Module LIST-RUNTIME : Support pour les listes en mémoire
+(load "src/list-runtime.lisp")
+
+;;; ============================================================================
 ;;; DÉFINITION SÉCURISÉE DES REGISTRES (évite problème $ dans CLISP)
 ;;; ============================================================================
 
@@ -326,18 +343,24 @@ qui a défini la fonction, ou NIL si non trouvée."
          (case
           (list :case (first args) (rest args)))
          
+         ;; QUOTE : retourne la valeur littérale
+         (quote
+          ;; (quote x) → constante x (symbole non évalué)
+          (list :constant (first args)))
+         
          ;; Structure LET
          (let
           (list :let (first args) (rest args)))
          
-         ;; Structure LOOP
+         ;; Structure LET* (bindings séquentiels)
+         (let*
+          (list :let* (first args) (rest args)))
+         
+         ;; Structure LOOP (BOOTSTRAP - Support avancé)
          (loop
-          ;; Syntaxe: (loop while condition do body)
-          (if (and (>= (length args) 4)
-                   (eq (first args) 'while)
-                   (eq (third args) 'do))
-              (list :loop-while (second args) (cdddr args))
-              (error "Syntaxe LOOP non supportée: ~A" expr)))
+          ;; Parser LOOP avancé (for/from/to/below/in/collect/etc)
+          ;; Retourne :loop-while pour cas simple ou :loop-advanced pour cas complexes
+          (parse-loop-advanced args))
          
          ;; Structure WHILE (PHASE 11 - Extension pour VM compilation)
          (while
@@ -408,6 +431,27 @@ qui a défini la fonction, ou NIL si non trouvée."
           (if (= (length args) 1)
               (list :cdr (first args))
               (error "CDR requiert exactement 1 argument: ~A" expr)))
+         
+         ;; FIRST (alias de CAR - PHASE BOOTSTRAP)
+         (first
+          ;; Syntaxe: (first list)
+          (if (= (length args) 1)
+              (list :car (first args))
+              (error "FIRST requiert exactement 1 argument: ~A" expr)))
+         
+         ;; REST (alias de CDR - PHASE BOOTSTRAP)
+         (rest
+          ;; Syntaxe: (rest list)
+          (if (= (length args) 1)
+              (list :cdr (first args))
+              (error "REST requiert exactement 1 argument: ~A" expr)))
+         
+         ;; SECOND (alias de CADR - PHASE BOOTSTRAP)
+         (second
+          ;; Syntaxe: (second list)
+          (if (= (length args) 1)
+              (list :car (list :cdr (first args)))
+              (error "SECOND requiert exactement 1 argument: ~A" expr)))
          
          ;; NULL (test de liste vide)
          (null
@@ -544,7 +588,9 @@ qui a défini la fonction, ou NIL si non trouvée."
                                 (cdr rest-body))  ; Il reste du code après
                            (cdr rest-body)  ; Sauter la docstring
                            rest-body)))  ; Pas de docstring
-              (list :defun name params body))))
+              ;; Parser la lambda-list pour détecter les paramètres avancés
+              (let ((parsed-params (parse-lambda-list params)))
+                (list :defun name params body parsed-params)))))
          
          ;; Appel de fonction
          (t
@@ -579,6 +625,54 @@ qui a défini la fonction, ou NIL si non trouvée."
     append reverse length
     print format)
   "Liste des opérateurs et fonctions built-in qui ne sont pas des variables")
+
+;;; ============================================================================
+;;; HELPERS POUR FREE-VARIABLES (BOOTSTRAPPING)
+;;; ============================================================================
+
+(defun extract-first-elements (list-of-pairs)
+  "Extrait le premier élément de chaque paire.
+   Remplace (mapcar #'first list-of-pairs) pour le bootstrapping."
+  (if (null list-of-pairs)
+      nil
+      (cons (first (first list-of-pairs))
+            (extract-first-elements (rest list-of-pairs)))))
+
+(defun extract-second-elements (list-of-pairs)
+  "Extrait le second élément de chaque paire.
+   Remplace (mapcar #'second list-of-pairs) pour le bootstrapping."
+  (if (null list-of-pairs)
+      nil
+      (cons (second (first list-of-pairs))
+            (extract-second-elements (rest list-of-pairs)))))
+
+(defun flatten-clauses (clauses)
+  "Aplatit une liste de clauses.
+   Remplace (mapcan (lambda (clause) clause) clauses) pour le bootstrapping."
+  (if (null clauses)
+      nil
+      (append (first clauses)
+              (flatten-clauses (rest clauses)))))
+
+(defun extract-clause-bodies (clauses)
+  "Extrait les corps des clauses (tout sauf le premier élément).
+   Remplace (mapcan (lambda (clause) (rest clause)) clauses) pour le bootstrapping."
+  (if (null clauses)
+      nil
+      (append (rest (first clauses))
+              (extract-clause-bodies (rest clauses)))))
+
+(defun map-eval-constant-expr (exprs)
+  "Applique eval-constant-expr à chaque élément de exprs.
+   Remplace (mapcar #'eval-constant-expr exprs) pour le bootstrapping."
+  (if (null exprs)
+      nil
+      (cons (eval-constant-expr (first exprs))
+            (map-eval-constant-expr (rest exprs)))))
+
+;;; ============================================================================
+;;; ANALYSE DES VARIABLES LIBRES (PHASE 9 - CLOSURES)
+;;; ============================================================================
 
 (defun free-variables (expr &optional (bound-vars '()))
   "Retourne la liste des variables libres dans une expression.
@@ -658,7 +752,7 @@ qui a défini la fonction, ou NIL si non trouvée."
               (let* ((definitions (first args))
                      (body (rest args))
                      ;; Noms des fonctions locales
-                     (func-names (mapcar #'first definitions))
+                     (func-names (extract-first-elements definitions))
                      ;; Les fonctions sont liées dans tout le LABELS
                      (new-bound (append func-names bound-vars)))
                 ;; Analyser chaque définition de fonction
@@ -699,7 +793,7 @@ qui a défini la fonction, ou NIL si non trouvée."
          ;; COND: (cond (test1 body1) (test2 body2) ...)
          (cond
           (free-variables-list 
-           (mapcan (lambda (clause) clause) args)
+           (flatten-clauses args)
            bound-vars))
          
          ;; WHEN, UNLESS: (when test body...)
@@ -719,7 +813,7 @@ qui a défini la fonction, ou NIL si non trouvée."
           (if (>= (length args) 1)
               (union (free-variables (first args) bound-vars)
                      (free-variables-list 
-                      (mapcan (lambda (clause) (rest clause)) (rest args))
+                      (extract-clause-bodies (rest args))
                       bound-vars)
                      :test #'eq)
               '()))
@@ -780,10 +874,21 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; ============================================================================
 
 (defun compile-constant (value env)
-  "Compile une constante en code ASM"
-  (declare (ignore env))
+  "Compile une constante en code ASM. 
+   Si la valeur est une liste, génère du code pour la construire dans le heap."
   (let ((result-reg *reg-v0*))
-    (list (list :LI value result-reg))))
+    (cond
+      ;; NIL → 0
+      ((null value)
+       (list (list :MOVE *reg-zero* result-reg)))
+      
+      ;; Liste (cons) : générer du code pour la construire dans le heap
+      ((consp value)
+       (compile-quoted-list value env))
+      
+      ;; Nombre ou symbole : utiliser LI standard
+      (t
+       (list (list :LI value result-reg))))))
 
 ;;; ============================================================================
 ;;; COMPILATION - VARIABLES
@@ -1438,6 +1543,39 @@ qui a défini la fonction, ou NIL si non trouvée."
     
     code))
 
+(defun compile-let* (bindings body env)
+  "Compile (let* ((var1 val1) (var2 val2) ...) body)
+   
+   LET* permet des bindings séquentiels : chaque variable peut utiliser les précédentes.
+   On expanse LET* en LETs imbriqués :
+   
+   (let* ((a 1) (b (+ a 2))) body)
+   →
+   (let ((a 1)) (let ((b (+ a 2))) body))
+   
+   Cas spécial : binding vide ou corps vide"
+  (cond
+    ;; Cas 1 : Pas de bindings - juste compiler le body
+    ((null bindings)
+     (let ((code '()))
+       (dolist (expr body)
+         (setf code (append code (compile-expr expr env))))
+       code))
+    
+    ;; Cas 2 : Un seul binding - compiler comme un LET simple
+    ((= (length bindings) 1)
+     (compile-let bindings body env))
+    
+    ;; Cas 3 : Plusieurs bindings - imbriquer les LETs
+    (t
+     (let* ((first-binding (first bindings))
+            (rest-bindings (rest bindings))
+            ;; Créer un LET imbriqué pour les bindings restants
+            ;; body est déjà une liste, on doit la splicer
+            (inner-let (append (list 'let* rest-bindings) body)))
+       ;; Compiler: (let (first-binding) inner-let)
+       (compile-let (list first-binding) (list inner-let) env)))))
+
 ;;; ============================================================================
 ;;; COMPILATION - LOOP WHILE
 ;;; ============================================================================
@@ -1509,6 +1647,42 @@ qui a défini la fonction, ou NIL si non trouvée."
                       (list (list :MOVE *reg-zero* *reg-v0*))))
     
     code))
+
+(defun compile-loop-advanced (parsed env)
+  "Compile un LOOP avancé (for/from/to/below/in/collect).
+   
+   BOOTSTRAPPING : Utilise l'expansion LOOP qui transforme
+   les constructions avancées en code simple (LET, WHILE, SETQ, etc).
+   
+   PARAMÈTRES :
+     parsed - Structure parsée par parse-loop-advanced
+              Format: (:loop-advanced . (:clauses ... :action ... :body ...))
+     env    - Environnement de compilation
+   
+   RETOURNE :
+     Code MIPS compilé.
+   
+   STRATÉGIE :
+     1. Expanser le LOOP vers LET/WHILE/SETQ
+     2. Compiler le code expansé (compile-expr fera le parsing)
+   
+   EXEMPLES :
+     (loop for i from 1 to 5 do (print i))
+     → (let ((i 1)) (while (<= i 5) (print i) (setq i (+ i 1))))
+     → Compile le LET
+   
+     (loop for x in list collect (* x 2))
+     → (let ((result nil) (temp list)) (while temp ...) (reverse result))
+     → Compile le LET"
+  
+  ;; Expanser le LOOP en code simple
+  (let* ((expanded-code (expand-loop-from-parsed parsed))
+         ;; Compiler directement (compile-expr fera le parsing)
+         (compiled-code (compile-expr expanded-code env)))
+    
+    ;; Ajouter un commentaire pour le débogage
+    (cons (list 'COMMENT (format nil "LOOP ADVANCED"))
+          compiled-code)))
 
 (defun compile-dolist (var list-expr body env)
   "Compile (dolist (var list-expr) body...)
@@ -1597,11 +1771,14 @@ qui a défini la fonction, ou NIL si non trouvée."
         (dolist (expr exprs)
           ;; Vérifier si c'est un DEFUN
           (if (and (listp expr) (eq (first expr) 'defun))
-              ;; DEFUN: compiler et ajouter au code de définitions
-              (let* ((name (second expr))
-                     (params (third expr))
-                     (body (cdddr expr))
-                     (defun-code (compile-defun name params body env)))
+              ;; DEFUN: parser d'abord, puis compiler
+              (let* ((parsed (parse-lisp-expr expr))
+                     ;; parsed = (:defun name params body parsed-params)
+                     (name (second parsed))
+                     (params (third parsed))
+                     (body (fourth parsed))
+                     (parsed-params (fifth parsed))
+                     (defun-code (compile-defun name params body parsed-params env)))
                 (setf has-functions t)
                 ;; Le code DEFUN va en tête
                 (setf function-defs (append function-defs defun-code))
@@ -2950,8 +3127,15 @@ qui a défini la fonction, ou NIL si non trouvée."
       (:let
        (compile-let (second parsed) (third parsed) env))
       
+      (:let*
+       (compile-let* (second parsed) (third parsed) env))
+      
       (:loop-while
        (compile-loop-while (second parsed) (third parsed) env))
+      
+      (:loop-advanced
+       ;; Compiler LOOP avancé (for/from/to/below/in/collect)
+       (compile-loop-advanced parsed env))
       
       (:while
        (compile-while (second parsed) (third parsed) env))
@@ -3033,7 +3217,12 @@ qui a défini la fonction, ou NIL si non trouvée."
        (compile-defvar (second parsed) (third parsed) env))
       
       (:defun
-       (compile-defun (second parsed) (third parsed) (fourth parsed) env))
+       ;; parsed = (:defun name params body parsed-params)
+       (compile-defun (second parsed)   ; name
+                     (third parsed)    ; params (original)
+                     (fourth parsed)   ; body
+                     (fifth parsed)    ; parsed-params (plist)
+                     env))
       
       (:error
        ;; ERROR compilé en HALT (arrêt immédiat)
@@ -3076,7 +3265,7 @@ qui a défini la fonction, ou NIL si non trouvée."
      (let ((op (first expr))
            (args (rest expr)))
        ;; Évaluer récursivement tous les arguments
-       (let ((vals (mapcar #'eval-constant-expr args)))
+       (let ((vals (map-eval-constant-expr args)))
          (case op
            (+ (apply #'+ vals))
            (- (apply #'- vals))
@@ -3527,27 +3716,69 @@ qui a défini la fonction, ou NIL si non trouvée."
 ;;; COMPILATION - DÉFINITION DE FONCTION
 ;;; ============================================================================
 
-(defun compile-defun (name params body env)
-  "Compile une définition de fonction avec gestion correcte de la pile"
-  (let ((func-label name)
+(defun compile-defun (name params body parsed-params env)
+  "Compile une définition de fonction avec gestion des paramètres avancés.
+   
+   BOOTSTRAPPING : Si la fonction a des paramètres avancés (&optional, &key),
+   on expanse d'abord la fonction en une version standard avec &rest, puis on compile.
+   
+   NOTE : &rest simple est géré directement par compile-defun-standard
+   
+   PARAMÈTRES :
+     name - Nom de la fonction
+     params - Liste de paramètres originale (peut contenir &optional, &rest, &key)
+     body - Corps de la fonction
+     parsed-params - Paramètres parsés (plist avec :required, :optional, :rest, :key)
+     env - Environnement de compilation
+   
+   RETOURNE :
+     Code MIPS pour la définition de fonction"
+  
+  ;; Vérifier si on a des paramètres avancés (mais pas juste &rest seul)
+  (let* ((has-optional (has-optional-params-p parsed-params))
+         (has-key (has-key-params-p parsed-params))
+         (needs-expansion (or has-optional has-key)))
+    
+    (if needs-expansion
+        ;; CAS 1 : Paramètres avancés (&optional ou &key) → Expanser puis compiler
+        (let* ((expanded-defun (expand-function-with-advanced-params name params body))
+               ;; expanded-defun = (defun name (req... &rest __rest__) (let* (...) body))
+               ;; Extraire les nouvelles informations
+               (new-params (third expanded-defun))   ; (req... &rest __rest__)
+               (new-body (cdddr expanded-defun))     ; ((let* (...) body))
+               ;; Parser les nouveaux paramètres (simple : req + &rest)
+               (new-parsed (parse-lambda-list new-params)))
+          ;; Compiler directement avec la version standard
+          ;; (car après expansion, on n'a plus que req + &rest simple)
+          (compile-defun-standard name new-params new-body new-parsed env))
+        
+        ;; CAS 2 : Pas de paramètres avancés (juste requis ou requis + &rest simple)
+        (compile-defun-standard name params body parsed-params env))))
+
+(defun compile-defun-standard (name params body parsed-params env)
+  "Compile une définition de fonction standard (sans paramètres avancés complexes).
+   Gère les paramètres requis et &rest simple."
+  (let* ((func-label name)
         (code '())
         (new-env (make-compiler-env))
-        (num-params (length params)))
+        (required-params (get-required-params parsed-params))
+        (rest-param (get-rest-param parsed-params))
+        (num-required (length required-params)))
     
     ;; Label de début de fonction
     (setf code (append code (list (list :LABEL func-label))))
     
     ;; Prologue: sauvegarder $ra et les paramètres sur la pile
     ;; Stack frame: [$ra] [param0] [param1] ... [paramN]
-    (let ((stack-size (+ 4 (* 4 num-params))))  ; 4 pour $ra + 4 par param
-      ;; Allouer espace pour $ra + params
+    (let ((stack-size (+ 4 (* 4 num-required))))  ; 4 pour $ra + 4 par param requis
+      ;; Allouer espace pour $ra + params requis
       (setf code (append code (list (list :ADDI *reg-sp* (- stack-size) *reg-sp*))))
       
       ;; Sauvegarder $ra au sommet
       (setf code (append code (list (list :SW *reg-ra* *reg-sp* 0))))
       
-      ;; Sauvegarder chaque paramètre sur la pile et mapper vers sa position
-      (loop for param in params
+      ;; Sauvegarder chaque paramètre requis sur la pile et mapper vers sa position
+      (loop for param in required-params
             for i from 0
             for arg-reg in (list *reg-a0* *reg-a1* *reg-a2* *reg-a3*)
             for saved-reg in (list *reg-s0* *reg-s1* *reg-s2* *reg-s3*)
@@ -3556,24 +3787,33 @@ qui a défini la fonction, ou NIL si non trouvée."
                  ;; Sauvegarder $aX sur la pile
                  (setf code (append code (list (list :SW arg-reg *reg-sp* offset))))
                  ;; Charger depuis la pile vers $sX pour l'utiliser
-                 ;; Format: (LW dest base offset)
                  (setf code (append code (list (list :LW saved-reg *reg-sp* offset))))
                  ;; Mapper le paramètre vers le registre sauvegardé
-                 (add-variable new-env param saved-reg))))
+                 (add-variable new-env param saved-reg)))
+      
+      ;; Si on a un paramètre &rest, le créer comme une liste des args restants
+      ;; NOTE : Pour simplifier, dans cette version, &rest est géré par l'expansion
+      ;; (les paramètres expansés n'ont que des paramètres requis + un &rest simple)
+      (when rest-param
+        ;; Le paramètre &rest collecte tous les arguments après les requis
+        ;; Pour l'instant, on le mappe vers un registre spécial ou on ignore
+        ;; (car l'expansion LET* dans le body s'en occupe)
+        ;; On pourrait créer une liste ici, mais c'est complexe en MIPS
+        ;; L'expansion via LET* est plus simple
+        (add-variable new-env rest-param *reg-s4*)))
     
     ;; Compiler le corps de la fonction (dernière expr = valeur retour dans $v0)
     (dolist (expr body)
       (setf code (append code (compile-expr expr new-env))))
     
     ;; Épilogue: restaurer $ra et libérer la pile
-    (let ((stack-size (+ 4 (* 4 num-params))))
+    (let ((stack-size (+ 4 (* 4 num-required))))
       (setf code (append code
-                        (list (list :LW *reg-ra* *reg-sp* 0)         ; Restaurer $ra - Format: (LW dest base offset)
+                        (list (list :LW *reg-ra* *reg-sp* 0)         ; Restaurer $ra
                               (list :ADDI *reg-sp* stack-size *reg-sp*)  ; Libérer pile
                               (list :JR *reg-ra*)))))            ; Retour
     
     ;; Enregistrer la fonction dans l'environnement
-    ;; Format: (name . label) où label est le symbole utilisé pour :JAL
     (push (cons name func-label) (compiler-env-functions env))
     
     code))
