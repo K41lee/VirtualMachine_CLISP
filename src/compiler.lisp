@@ -7,6 +7,9 @@
 ;;; CHARGEMENT DES MODULES BOOTSTRAPPING
 ;;; ============================================================================
 
+;; Module TABLE DE SYMBOLES : Interning pour préserver symbole ↔ ID
+(load "src/symbol-table.lisp")
+
 ;; Modules LOOP : Parser et expanser les constructions LOOP avancées
 (load "src/loop-parser.lisp")
 (load "src/loop-expander.lisp")
@@ -875,7 +878,8 @@ qui a défini la fonction, ou NIL si non trouvée."
 
 (defun compile-constant (value env)
   "Compile une constante en code ASM. 
-   Si la valeur est une liste, génère du code pour la construire dans le heap."
+   Si la valeur est une liste, génère du code pour la construire dans le heap.
+   Si c'est un symbole, utilise l'interning pour préserver l'identité."
   (let ((result-reg *reg-v0*))
     (cond
       ;; NIL → 0
@@ -886,7 +890,12 @@ qui a défini la fonction, ou NIL si non trouvée."
       ((consp value)
        (compile-quoted-list value env))
       
-      ;; Nombre ou symbole : utiliser LI standard
+      ;; Symbole : utiliser l'interning pour obtenir un ID unique
+      ((symbolp value)
+       (let ((symbol-id (intern-symbol value)))
+         (list (list :LI symbol-id result-reg))))
+      
+      ;; Nombre : utiliser LI standard
       (t
        (list (list :LI value result-reg))))))
 
@@ -3671,13 +3680,32 @@ qui a défini la fonction, ou NIL si non trouvée."
           ;; Enfant: passer $FP (notre frame devient leur static link)
           (setf code (append code (list (list :MOVE (get-reg :fp) *reg-t3*))))))
     
-    ;; Compiler les arguments et les placer dans $a0-$a3
-    (loop for arg in args
-          for reg in arg-regs
-          do (let ((arg-code (compile-expr arg env)))
-               (setf code (append code
-                                 arg-code
-                                 (list (list :MOVE *reg-v0* reg))))))
+    ;; Compiler les arguments et les sauvegarder sur la pile
+    ;; FIX: On doit sauvegarder chaque argument après compilation car la compilation
+    ;; du prochain argument peut écraser les registres $A0-$A3
+    (let ((num-args (length args)))
+      (when (> num-args 0)
+        ;; Allouer espace sur la pile pour les arguments
+        (setf code (append code (list (list :ADDI *reg-sp* (- (* 4 num-args)) *reg-sp*))))
+        
+        ;; Compiler et sauvegarder chaque argument
+        (loop for arg in args
+              for i from 0
+              do (let ((arg-code (compile-expr arg env))
+                       (offset (* 4 i)))
+                   (setf code (append code
+                                     arg-code
+                                     (list (list :SW *reg-v0* *reg-sp* offset))))))
+        
+        ;; Restaurer tous les arguments dans les registres $A0-$A3
+        (loop for reg in arg-regs
+              for i from 0
+              while (< i num-args)
+              do (let ((offset (* 4 i)))
+                   (setf code (append code (list (list :LW reg *reg-sp* offset))))))
+        
+        ;; Libérer l'espace pile
+        (setf code (append code (list (list :ADDI *reg-sp* (* 4 num-args) *reg-sp*))))))
     
     ;; PHASE 9: Pour appel de closure, charger le label et passer la closure dans $s1
     (when is-closure-call

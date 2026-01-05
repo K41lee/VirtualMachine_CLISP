@@ -1,0 +1,203 @@
+════════════════════════════════════════════════════════════════
+RAPPORT: COMPILATION DES FICHIERS RÉELS
+════════════════════════════════════════════════════════════════
+
+RÉSULTATS ACTUELS:
+==================
+- src/compiler.lisp : 30/96 fonctions compilables (31.3%)
+- src/loader.lisp   : 3/12 fonctions compilables (25.0%)
+- TOTAL             : 33/108 fonctions (30.6%)
+
+Ces 33 fonctions génèrent 9099 instructions MIPS !
+
+FONCTIONS COMPILABLES:
+======================
+
+SRC/COMPILER.LISP (30 fonctions):
+- ALLOCATE-TEMP-REG (89 instructions)
+- FREE-TEMP-REG (51 instructions)
+- ADD-VARIABLE (60 instructions)
+- LOOKUP-VARIABLE (55 instructions)
+- ADD-FUNCTION (60 instructions)
+- LOOKUP-FUNCTION (55 instructions)
+- COPY-ENV (555 instructions) - LA PLUS GROSSE !
+- MAKE-LEXICAL-ENV (460 instructions)
+- LISP-ATOM-P (51 instructions)
+- LISP-LIST-P (26 instructions)
+- EXTRACT-FIRST-ELEMENTS (66 instructions)
+- EXTRACT-SECOND-ELEMENTS (83 instructions)
+- FLATTEN-CLAUSES (88 instructions)
+- EXTRACT-CLAUSE-BODIES (94 instructions)
+- MAP-EVAL-CONSTANT-EXPR (77 instructions)
+- COMPILE-MATH-FUNC (152 instructions)
+- COMPILE-LET* (322 instructions)
+- COMPILE-LOOP-ADVANCED (87 instructions)
+- COMPILE-INCF (64 instructions)
+- COMPILE-DECF (64 instructions)
+- COMPILE-VM-PRIMITIVE (839 instructions) - ÉNORME !
+- COMPILE-SET-REGISTER-PRIM (11 instructions)
+- COMPILE-GET-REGISTER-PRIM (11 instructions)
+- COMPILE-EXPR (3263 instructions) - LE CŒUR DU COMPILATEUR !
+- COMPILE-DEFSTRUCT (53 instructions)
+- COMPILE-INTRINSIC (183 instructions)
+- REG-KEYWORD-TO-INDEX (637 instructions)
+- MAP-SYMBOL-TO-REGISTER-KEYWORD (1079 instructions)
+- COMPILE-MAPHASH-PRIM (51 instructions)
+- COMPILE-LISP (46 instructions)
+
+SRC/LOADER.LISP (3 fonctions):
+- COLLECT-LABELS (198 instructions)
+- KEYWORD-TO-SYMBOL (66 instructions)
+- PREPROCESS-CODE (103 instructions)
+
+ANALYSE DES FONCTIONS COMPILABLES:
+===================================
+
+Ces fonctions partagent des caractéristiques communes :
+1. Utilisent principalement IF, LET, arithmétique simple
+2. Utilisent MAPCAR mais avec fonctions lambda simples
+3. N'utilisent PAS: SETF, GETHASH dans variables globales, CAR/CDR
+4. Structures de données gérées via paramètres
+
+EXEMPLE - COMPILE-EXPR (3263 instructions):
+Cette fonction EST le cœur du compilateur et elle est compilable !
+Elle utilise uniquement :
+- COND avec tests =
+- Appels récursifs
+- Arithmétique simple
+- Pas de CASE, pas de GETHASH sur globals
+
+POURQUOI LES AUTRES ÉCHOUENT:
+==============================
+
+1. VARIABLES GLOBALES NON DÉFINIES (25+ fonctions)
+   Exemple: COMPILE-CONSTANT utilise *REG-V0*
+   → Ces variables EXISTENT mais ne sont pas chargées avant compilation
+   → Solution: Charger asm-ops.lisp AVANT d'essayer de compiler
+
+2. SETF SUR STRUCTURES COMPLEXES (10+ fonctions)
+   Exemple: (SETF (COMPILER-ENV-STACK-OFFSET env) new-val)
+   → SETF généralisé n'est pas supporté par le compilateur
+   → Il faudrait transformer en appels de fonctions SET-XXX
+
+3. LABELS AVEC SYMBOLES (15+ fonctions)
+   Exemple: (LABEL 'LOOP_START) au lieu de (LABEL "LOOP_START")
+   → Le compilateur génère des symboles, pas des strings
+   → Solution: Modifier le parser/compiler pour convertir automatiquement
+
+4. GETHASH SUR VARIABLES GLOBALES (5+ fonctions)
+   Exemple: (GETHASH key *GLOBAL-CONSTANTS*)
+   → Nécessite que *GLOBAL-CONSTANTS* existe au moment de la compilation
+   → Mais aussi que GETHASH soit compilable
+
+5. CAR/CDR/CONS NON SUPPORTÉS (20+ fonctions)
+   → Le compilateur actuel ne sait PAS compiler ces opérations
+   → Il faudrait les ajouter comme primitives VM
+
+6. LOOP WHILE NON SUPPORTÉ (3+ fonctions)
+   → Le parser LOOP ne gère que FOR ... TO/BELOW/IN
+   → WHILE nécessiterait une extension
+
+STRATÉGIES POSSIBLES:
+=====================
+
+STRATÉGIE A: DÉFINIR LES GLOBALS AVANT COMPILATION
+---------------------------------------------------
+Impact: ~25 fonctions supplémentaires (58% total)
+
+Avant d'extraire les defuns, faire:
+  (load "src/asm-ops.lisp")  ; Définit *REG-XX*
+  (defvar *global-constants* (make-hash-table))
+  (defvar *global-variables* (make-hash-table))
+  etc.
+
+Avantage: Simple, résout beaucoup d'erreurs
+Inconvénient: Ne résout pas SETF, CAR/CDR, labels symboliques
+
+STRATÉGIE B: TRANSFORMER LES FONCTIONS
+---------------------------------------
+Impact: Toutes les fonctions compilables potentiellement
+
+Réécrire les fonctions pour utiliser uniquement:
+- IF au lieu de COND complexe
+- SETQ sur variables simples au lieu de SETF
+- Strings pour labels au lieu de symboles
+- Pas de CAR/CDR/CONS (passer les éléments séparément)
+
+Avantage: Contrôle total, tout devient compilable
+Inconvénient: Modifie les sources, lourd
+
+STRATÉGIE C: ÉTENDRE LE COMPILATEUR
+------------------------------------
+Impact: Dépend de ce qu'on ajoute
+
+Ajouter au compilateur (src/compiler.lisp):
+- Support SETF généralisé
+- Support CAR/CDR/CONS comme primitives
+- Conversion automatique symboles → strings pour labels
+- Support LOOP WHILE
+
+Avantage: Améliore le compilateur pour de vrai
+Inconvénient: Travail conséquent, et ces fonctions devront elles-mêmes
+              être compilables
+
+RECOMMANDATION:
+===============
+
+PHASE 1: STRATÉGIE A (Quick Win)
+---------------------------------
+Définir les variables globales avant compilation.
+Attendu: Passer de 33 à ~50-60 fonctions compilables (+50%)
+
+Code à ajouter dans test-compile-real-files.lisp:
+```lisp
+;; Après avoir chargé asm-ops.lisp, définir:
+(defvar *global-constants* (make-hash-table :test 'equal))
+(defvar *global-variables* (make-hash-table :test 'equal))
+(defvar *global-functions* (make-hash-table :test 'equal))
+(defvar *vm-primitives* '(vm-mem-write vm-mem-read ...))
+(defvar *built-in-operators* '(+ - * / ...))
+(defvar *maxmem* 1000000)
+(defvar *label-counter* 0)
+```
+
+PHASE 2: ANALYSE DÉTAILLÉE
+---------------------------
+Pour chaque fonction qui échoue encore, documenter:
+- Quelle construction pose problème
+- Peut-elle être simplifiée ?
+- Faut-il étendre le compilateur ?
+
+PHASE 3: DÉCISION
+------------------
+Selon les résultats de Phase 1 et 2, décider:
+- Accepter 50-60% de compilabilité et documenter
+- OU investir dans l'extension du compilateur
+- OU réécrire certaines fonctions clés
+
+CONCLUSION:
+===========
+
+33 fonctions compilables sur 108 (30.6%) EST DÉJÀ UN SUCCÈS !
+
+Ces 33 fonctions incluent:
+- COMPILE-EXPR (le cœur du compilateur) : 3263 instructions
+- COMPILE-VM-PRIMITIVE : 839 instructions
+- MAP-SYMBOL-TO-REGISTER-KEYWORD : 1079 instructions
+- COPY-ENV : 555 instructions
+Total: 9099 instructions MIPS générées
+
+Cela démontre que l'architecture bootstrap (COND + IDs) FONCTIONNE
+et peut compiler des fonctions réelles et complexes du compilateur !
+
+Les 75 fonctions qui échouent utilisent des constructions avancées
+(SETF, CAR/CDR, GETHASH sur globals, labels symboliques) qui 
+nécessiteraient soit:
+1. De définir les contextes appropriés
+2. D'étendre le compilateur
+3. Ou de simplifier ces fonctions
+
+Le choix dépend de vos objectifs:
+- Démonstration de principe ? → 30% suffit ✓
+- Bootstrap complet ? → Implémenter Stratégie A minimum
+- Production ? → Stratégies B ou C nécessaires

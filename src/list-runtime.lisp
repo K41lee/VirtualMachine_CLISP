@@ -3,6 +3,14 @@
 ;;;; Génère du code MIPS pour construire des listes en mémoire
 
 ;;; ============================================================================
+;;; CHARGEMENT DES DÉPENDANCES
+;;; ============================================================================
+
+;; Charger la table de symboles si pas déjà chargée
+(unless (fboundp 'intern-symbol)
+  (load "src/symbol-table.lisp"))
+
+;;; ============================================================================
 ;;; DÉFINITION DES REGISTRES (pour compatibilité standalone)
 ;;; ============================================================================
 
@@ -33,11 +41,10 @@
        ((numberp list)
         (list (list :LI list *reg-v0*)))
        
-       ;; Symbole : pour l'instant, générer un hash code
-       ;; TODO: Implémenter une vraie table de symboles
+       ;; Symbole : utiliser l'interning
        ((symbolp list)
-        (let ((hash (symbol-hash list)))
-          (list (list :LI hash *reg-v0*))))
+        (let ((symbol-id (intern-symbol list)))
+          (list (list :LI symbol-id *reg-v0*))))
        
        (t
         (list (list :LI 0 *reg-v0*)))))
@@ -45,14 +52,6 @@
     ;; Liste (cons) : compiler récursivement
     (t
      (compile-cons-construction (car list) (cdr list) env))))
-
-(defun symbol-hash (sym)
-  "Calcule un hash simple pour un symbole (somme des codes ASCII mod 2^24)"
-  (let ((name (symbol-name sym))
-        (hash 0))
-    (loop for char across name do
-      (setf hash (mod (+ (* hash 31) (char-code char)) 16777216)))
-    hash))
 
 (defun compile-cons-construction (car-expr cdr-expr env)
   "Génère du code pour construire une cons cell (car-expr . cdr-expr).

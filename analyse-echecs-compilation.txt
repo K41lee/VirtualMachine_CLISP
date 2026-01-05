@@ -1,0 +1,121 @@
+ANALYSE DES ÉCHECS DE COMPILATION
+===================================
+
+Sur la base des tests de compilation des fichiers réels :
+
+FICHIER: src/compiler.lisp (30/96 compilées, 66 échouent)
+FICHIER: src/loader.lisp (3/12 compilées, 9 échouent)
+
+TOTAL: 33/108 fonctions compilables (30.6%)
+       75 fonctions échouent
+
+CATÉGORIES D'ÉCHECS:
+====================
+
+1. VARIABLES GLOBALES NON DÉFINIES (25+ cas)
+   - *REG-V0*, *REG-SP*, *REG-T0*, *REG-S4*, etc.
+   - *GLOBAL-CONSTANTS*, *GLOBAL-VARIABLES*
+   - *VM-PRIMITIVES*, *BUILT-IN-OPERATORS*
+   - *MAXMEM*, *REG-ZERO*
+
+   Solution: Charger ces variables avant la compilation
+   ou les définir dans le bootstrap
+
+2. OPÉRATIONS LISTE NON SUPPORTÉES (20+ cas)
+   - CAR, CDR, CONS, LIST
+   - APPEND (avec nombre variable d'arguments)
+   - NULL, MEMBER, ASSOC
+   
+   Solution: Ajouter ces primitives au compilateur bootstrap
+
+3. OPÉRATIONS HASH-TABLE NON SUPPORTÉES (5+ cas)
+   - GETHASH, MAKE-HASH-TABLE
+   - HASH-TABLE-COUNT
+   - MAPHASH (partiellement supporté)
+   
+   Solution: Ajouter support hash-tables au bootstrap
+
+4. PRÉDICATS DE TYPE NON SUPPORTÉS (10+ cas)
+   - LISTP, INTEGERP, SYMBOLP
+   - EQ (comparaison de symboles)
+   
+   Solution: Ajouter ces prédicats au bootstrap
+
+5. SETF SUR EXPRESSIONS COMPLEXES (10+ cas)
+   - (SETF (CAR ...) ...)
+   - (SETF (GETHASH ...) ...)
+   - (SETF (COMPILER-ENV-STACK-OFFSET ...) ...)
+   
+   Solution: Supporter SETF généralisé ou utiliser SETQ
+
+6. LABELS AVEC SYMBOLES AU LIEU DE STRINGS (15+ cas)
+   - LOOP_START, ELSE, COND_END, etc.
+   - Le parser génère ces symboles directement
+   
+   Solution: Modifier le compilateur pour accepter les symboles
+   comme labels et les convertir en strings
+
+7. LOOP AVEC WHILE NON SUPPORTÉ (3+ cas)
+   - (LOOP WHILE condition DO ...)
+   
+   Solution: Ajouter support LOOP WHILE au parser
+
+8. FONCTIONS RÉCURSIVES COMPLEXES (5+ cas)
+   - Fonctions qui s'appellent elles-mêmes
+   - Mais le compilateur supporte déjà les appels récursifs
+   - Problème: les erreurs sont dans d'autres parties
+
+PRIORITÉS POUR RENDRE TOUT COMPILABLE:
+=======================================
+
+PHASE 1: VARIABLES GLOBALES (Impact: ~25 fonctions)
+   ✓ Charger asm-ops.lisp avant compilation (définit *REG-XX*)
+   ✓ Définir *GLOBAL-CONSTANTS*, *GLOBAL-VARIABLES*
+   ✓ Définir *VM-PRIMITIVES*, *BUILT-IN-OPERATORS*
+
+PHASE 2: PRIMITIVES LISTE (Impact: ~20 fonctions)
+   → Ajouter CAR, CDR, CONS au compilateur bootstrap
+   → Ajouter NULL (test si NIL)
+   → Ajouter LIST (construction de listes)
+   → Ajouter APPEND (2 arguments minimum)
+
+PHASE 3: LABELS SYMBOLIQUES (Impact: ~15 fonctions)
+   → Modifier GEN-LABEL pour accepter symboles
+   → Convertir symboles en strings automatiquement
+
+PHASE 4: PRÉDICATS (Impact: ~10 fonctions)
+   → Ajouter LISTP, INTEGERP, SYMBOLP
+   → Ajouter EQ pour comparer symboles
+
+PHASE 5: SETF GÉNÉRALISÉ (Impact: ~10 fonctions)
+   → Supporter (SETF (CAR x) val)
+   → Supporter (SETF (GETHASH key ht) val)
+   → Ou transformer en appels de fonctions
+
+PHASE 6: HASH-TABLES (Impact: ~5 fonctions)
+   → Ajouter GETHASH, MAKE-HASH-TABLE
+   → Supporter comme primitives VM
+
+PHASE 7: LOOP WHILE (Impact: ~3 fonctions)
+   → Étendre parser LOOP pour WHILE
+
+ESTIMATION:
+===========
+Phases 1-3: Permettraient de compiler ~60 fonctions supplémentaires (55%)
+Phases 4-7: Permettraient de compiler les 15 dernières (100%)
+
+PLAN D'ACTION:
+==============
+1. Créer src/compiler-bootstrap-extended.lisp avec:
+   - Support CAR, CDR, CONS, LIST
+   - Support NULL, LISTP, INTEGERP, SYMBOLP, EQ
+   - Gestion labels symboliques
+   - Chargement variables globales
+
+2. Modifier le test pour:
+   - Charger les variables globales avant compilation
+   - Utiliser compiler-bootstrap-extended.lisp
+
+3. Tester à nouveau et mesurer progression
+
+4. Itérer sur les échecs restants
