@@ -1,262 +1,458 @@
-# Machine Virtuelle MIPS en Common LISP
+# Machine Virtuelle MIPS en Common Lisp
 
-Projet de machine virtuelle avec compilateur LISP → MIPS et système de bootstrap complet.
+## 📖 Description
 
-## 🎯 Caractéristiques
+Ce projet implémente une **machine virtuelle MIPS** complète avec un **compilateur Lisp → MIPS** et un système de **bootstrap auto-hébergé**. Le compilateur peut se compiler lui-même et s'exécuter dans la VM !
 
-- **VM complète** : Interprète MIPS avec 10 Mo de mémoire
-- **Compilateur LISP → MIPS** : Compile du code LISP en instructions MIPS
-- **Bootstrap réel** : VM0 → VM1 → VM2 (auto-hébergement)
-- **100M instructions max** : Support de calculs récursifs complexes
-- **Benchmarks multi-niveaux** : Comparaison LISP natif / VM0 / VM1→VM2
+### 🎯 Caractéristiques principales
 
-## 📁 Structure du Projet
+- **VM MIPS complète** : Interprète d'instructions MIPS avec 10 Mo de mémoire
+- **Compilateur Lisp → MIPS** : Transforme des fonctions Lisp en code machine MIPS
+- **Bootstrap complet** : Le compilateur peut se compiler lui-même dans la VM
+- **FFI (Foreign Function Interface)** : Délégation d'appels de la VM vers Lisp natif
+- **Marshalling** : Retour de structures complexes (listes) depuis la VM
 
-```
-VirtualMachine_CLISP/
-├── README.md                    # Ce fichier
-├── main.lisp                    # Point d'entrée principal
-│
-├── src/                         # Code source principal
-│   ├── vm.lisp                  # Machine virtuelle MIPS
-│   ├── vm-compilable.lisp       # Version compilable de la VM
-│   ├── compiler.lisp            # Compilateur LISP → MIPS
-│   ├── asm-ops.lisp             # Opérations et registres MIPS
-│   ├── loader.lisp              # Chargeur de code MIPS
-│   ├── utils.lisp               # Utilitaires
-│   └── bootstrap/               # Code pour bootstrap VM1
-│
-├── benchmarks/                  # Système de benchmarks
-│   ├── run-benchmark.lisp       # Benchmark principal (3 scénarios)
-│   ├── benchmark-multi-level.lisp
-│   ├── benchmark-performance.lisp
-│   ├── benchmark-simple.lisp
-│   └── demo-benchmark.lisp
-│
-├── tests/                       # Tests
-│   ├── integration/             # Tests d'intégration
-│   │   ├── test-bootstrap-mod.lisp      # Test bootstrap avec fibo(20)
-│   │   ├── test-vm1-bootstrap.lisp      # Test VM1
-│   │   └── test-fibo-recursive.lisp     # Tests Fibonacci
-│   ├── unit/                    # Tests unitaires
-│   │   ├── test-compiler-vm0.lisp
-│   │   ├── test-compilation-rate.lisp
-│   │   ├── test-vm-compilable.lisp
-│   │   └── ...
-│   └── debug/                   # Tests de debug
-│       ├── test-debug-deep.lisp
-│       ├── test-let-debug.lisp
-│       └── test-backtrace.lisp
-│
-├── tools/                       # Outils de développement
-│   ├── generate-vm-executable.lisp      # Génère VM1 (MIPS)
-│   └── compile-vm-simple.lisp           # Compilation simplifiée
-│
-├── output/                      # Fichiers générés
-│   └── vm-executable.mips       # VM1 compilée (1605 instructions)
-│
-├── documentation/               # Documentation complète
-│   ├── README.md                # Documentation détaillée
-│   ├── TODO-VRAI-BOOTSTRAP.md   # Guide du bootstrap
-│   ├── BENCHMARK-README.md      # Guide des benchmarks
-│   ├── STRUCTURE_PROJET.md      # Structure technique
-│   └── CHANGELOG_PHASE11.md     # Historique des changements
-│
-├── docs/                        # Documentation technique
-│   └── phases/                  # Documentation par phase
-│
-├── scripts/                     # Scripts utilitaires
-├── examples/                    # Exemples de code
-├── logs/                        # Logs d'exécution
-└── archive/                     # Anciens fichiers
+---
 
-```
+## 🚀 Démarrage rapide
 
-## 🚀 Démarrage Rapide
+### Prérequis
 
-### Test du Bootstrap Complet
+- **CLISP** (ou autre implémentation Common Lisp)
+
+### Utilisation
+
+Il existe **4 programmes principaux** que vous pouvez exécuter :
 
 ```bash
-clisp tests/integration/test-bootstrap-mod.lisp
+# 1. Compiler et exécuter une fonction avec le compilateur natif
+clisp exec-code.lisp
+
+# 2. Afficher le code MIPS généré (compilateur natif)
+clisp show-compile.lisp
+
+# 3. Compiler et exécuter avec le compilateur bootstrappé dans la VM
+clisp exec-code-bootstrap.lisp
+
+# 4. Afficher le code MIPS généré par le compilateur bootstrappé
+clisp show-compile-bootstrap.lisp
 ```
 
-Exécute **fibo(20)** dans les 3 scénarios :
-- LISP natif (référence)
-- VM0 (VM en LISP)
-- VM1→VM2 (Bootstrap complet)
+### Tester une autre fonction
 
-**Résultat attendu** : `10946` pour tous les scénarios
+**Toutes les fonctions sont définies dans un seul fichier : `code.lisp`**
 
-### Benchmark Personnalisé
+1. Éditez `code.lisp`
+2. Modifiez les paramètres :
+   - `*function-definition*` : la fonction à compiler
+   - `*function-name*` : nom pour l'exécution
+   - `*function-args*` : arguments de test
+   - `*expected-result*` : résultat attendu
+3. Relancez n'importe quel programme (`exec-code.lisp`, `show-compile.lisp`, etc.)
 
-```bash
-clisp
-> (load "benchmarks/run-benchmark.lisp")
-> (benchmark-code '(+ 10 20 30))
-> (benchmark-code '(* 7 8) :scenarios '(:native :vm0))
-```
-
-### Génération de VM1
-
-```bash
-clisp tools/generate-vm-executable.lisp
-```
-
-Compile `src/vm-compilable.lisp` → `output/vm-executable.mips` (27 fonctions, 1605 instructions)
-
-## 📊 Performances Mesurées
-
-### fibo(20) - Résultats
-
-| Scénario | Résultat | Temps | Overhead |
-|----------|----------|-------|----------|
-| LISP natif | 10946 | 0.006s | 1x (référence) |
-| VM0 | 10946 | 15.44s | **2481x** |
-| VM1→VM2 | 10946 | 14.67s | **2357x** |
-
-### Configuration
-
-- **Mémoire VM** : 10 Mo (10 485 760 octets)
-- **Limite instructions** : 100 millions
-- **Registres** : 42 (style MIPS)
-
-## 🎓 Architecture
-
-### Bootstrap Complet
-
-```
-LISP natif (hôte)
-    ↓
-VM0 (interprète MIPS en LISP)
-    ↓ charge et exécute
-VM1 (code MIPS compilé - 1605 instructions)
-    ↓ crée via FN_MAKE-NEW-VM
-VM2 (instance VM dans VM1)
-    ↓
-Code utilisateur (fibo, etc.)
-```
-
-### Fonctions VM1 Disponibles
-
-- `FN_MAKE-NEW-VM` : Crée une nouvelle VM
-- `FN_RUN-VM`, `FN_RUN-VM-STEP` : Exécution
-- `FN_GET-REGISTER`, `FN_SET-REGISTER` : Registres
-- `FN_MEM-READ`, `FN_MEM-WRITE` : Mémoire
-- `FN_FETCH-INSTRUCTION`, `FN_EXECUTE-INSTRUCTION`
-- Et 20+ autres fonctions...
-
-## 📚 Documentation
-
-- **[Guide Complet](documentation/README.md)** : Documentation détaillée
-- **[Bootstrap](documentation/TODO-VRAI-BOOTSTRAP.md)** : Explications du bootstrap
-- **[Benchmarks](documentation/BENCHMARK-README.md)** : Guide des benchmarks
-- **[Structure](documentation/STRUCTURE_PROJET.md)** : Architecture technique
-
-## 🛠️ Développement
-
-### Tests Unitaires
-
-```bash
-clisp tests/unit/test-compiler-vm0.lisp
-clisp tests/unit/test-vm-compilable.lisp
-```
-
-### Tests de Debug
-
-```bash
-clisp tests/debug/test-debug-deep.lisp
-```
-
-### Modifier la VM
-
-1. Éditer `src/vm-compilable.lisp`
-2. Régénérer VM1 : `clisp tools/generate-vm-executable.lisp`
-3. Tester : `clisp tests/integration/test-bootstrap-mod.lisp`
-
-## 🎯 Objectifs Atteints
-
-✅ VM MIPS complète (10 Mo, 42 registres)  
-✅ Compilateur LISP → MIPS fonctionnel  
-✅ Bootstrap réel VM0→VM1→VM2 (pas de simulation)  
-✅ 100M instructions max (fibo(20) et plus)  
-✅ Benchmarks multi-niveaux avec résultats cohérents  
-✅ 27 fonctions VM1 compilées  
-✅ Table des labels pour appels de fonctions  
-
-## 📝 Notes Techniques
-
-### Appels de Fonctions VM1
+**Exemple** :
 
 ```lisp
-;; VM0 peut appeler des fonctions de VM1
-(call-vm1-function vm0 label-table 'FN_MAKE-NEW-VM)
+(defparameter *function-definition*
+  '(defun fact (n)
+     (if (<= n 1)
+         1
+         (* n (fact (- n 1))))))
+
+(defparameter *function-name* 'FACT)
+(defparameter *function-args* '(10))
+(defparameter *expected-result* 3628800)
 ```
 
-### Limitations Connues
+Des exemples de fonctions (fibonacci, factorielle, ackermann, etc.) sont inclus en commentaires dans `code.lisp`.
 
-- `FN_LOAD-CODE` non compilé (problème LET* avec liaisons multiples)
-- Exécution finale utilise un fallback natif
-- Pas de cascade complète VM0→VM1→VM2 pour le code utilisateur
+---
 
-## � État Final du Projet (Décembre 2025)
+## 📁 Structure du projet
 
-### Réalisations Majeures
+### Fichiers principaux (racine)
 
-**✅ PROJET TERMINÉ AVEC SUCCÈS**
+| Fichier | Description | Usage |
+|---------|-------------|-------|
+| `code.lisp` | **Définition centralisée** de la fonction à compiler | Modifiez ce fichier pour tester d'autres fonctions |
+| `exec-code.lisp` | Compile et **exécute** une fonction (compilateur natif) | `clisp exec-code.lisp` |
+| `exec-code-bootstrap.lisp` | Compile et exécute avec le **compilateur bootstrappé** | `clisp exec-code-bootstrap.lisp` |
+| `show-compile.lisp` | **Affiche le code MIPS** généré (compilateur natif) | `clisp show-compile.lisp` |
+| `show-compile-bootstrap.lisp` | Affiche le code MIPS du **compilateur bootstrappé** | `clisp show-compile-bootstrap.lisp` |
 
-Le projet a dépassé ses objectifs initiaux avec l'implémentation de features avancées :
+### Dossier `src/` - Composants du système
 
-#### Fonctionnalités Implémentées (96.6%)
-- ✅ **29/29 constructions** Common Lisp essentielles supportées
-- ✅ **LOOP avancé** : FOR/FROM/TO/BELOW/IN/COLLECT (18/18 tests)
-- ✅ **Paramètres avancés** : &optional, &key, &rest (50/51 tests, 98%)
-- ✅ **DEFSTRUCT** : Structures avec constructeurs/accesseurs (22/22 tests)
-- ✅ **Bootstrapping** : Élimination MAPCAR/LAMBDA, préparation auto-compilation
+| Fichier | Lignes | Description |
+|---------|--------|-------------|
+| `vm.lisp` | ~1480 | **Machine virtuelle MIPS** : interpréteur d'instructions, gestion mémoire, registres, FFI |
+| `compiler-simplified.lisp` | ~1000 | **Compilateur Lisp → MIPS** : analyse, génération de code, optimisations |
+| `loader.lisp` | ~250 | **Chargeur de code** : charge les instructions MIPS en mémoire VM |
+| `asm-ops.lisp` | ~600 | **Définitions MIPS** : opcodes, registres, opérations assembleur |
+| `utils-bootstrap.lisp` | ~230 | **Utilitaires bootstrap** : fonctions pour compiler le compilateur dans la VM |
+| `utils.lisp` | ~300 | **Utilitaires généraux** : fonctions auxiliaires, affichage, debug |
 
-#### Métriques
-- **10,500 lignes** de code (compilateur + tests + documentation)
-- **54 tests automatisés** avec 96.3% de réussite (52/54)
-- **2,500+ lignes** de documentation technique
-- **15+ bugs** identifiés et corrigés avec documentation complète
+**Total : ~3800 lignes de code**
 
-#### Architecture Avancée
-- Parser modulaire (LISP → AST)
-- Expanders pour LOOP et lambda-lists
-- Système d'environnements lexicaux
-- Gestion des paramètres avancés conforme Common Lisp
+---
 
-### Limitation Identifiée
+## 🔧 Architecture détaillée
 
-⚠️ **VM sans gestion mémoire dynamique**
-- Impact : Listes non stockables en mémoire VM
-- Conséquence : Auto-compilation complète non possible
-- Solution : Implémenter heap + garbage collection (3-4 semaines)
+### Principe de fonctionnement
 
-### Documentation Complète
+```
+┌─────────────┐
+│  code.lisp  │ ← Vous modifiez uniquement ce fichier
+└──────┬──────┘
+       │
+       ├─────────────────────────────────────────────────────┐
+       │                                                     │
+       v                                                     v
+┌────────────────────┐                          ┌──────────────────────────┐
+│  Compilation       │                          │  Compilation             │
+│  Native            │                          │  Bootstrappée            │
+├────────────────────┤                          ├──────────────────────────┤
+│ compiler-          │                          │ 1. Compiler le           │
+│ simplified.lisp    │                          │    compilateur en MIPS   │
+│ (natif Lisp)       │                          │ 2. Charger dans VM0      │
+│                    │                          │ 3. Exécuter VM0 pour     │
+│ ↓                  │                          │    compiler la fonction  │
+│ Instructions MIPS  │                          │ 4. Code MIPS résultant   │
+└────────┬───────────┘                          └──────────┬───────────────┘
+         │                                                 │
+         v                                                 v
+┌────────────────────┐                          ┌──────────────────────────┐
+│  vm.lisp           │                          │  vm.lisp                 │
+│  Exécute le code   │                          │  VM0 compile             │
+│  MIPS généré       │                          │  puis exécute            │
+└────────────────────┘                          └──────────────────────────┘
+```
 
-Toute la documentation se trouve dans `/FichierTexteSuivi/` :
-- **SYNTHESE_FINALE_PROJET.txt** : Vue d'ensemble complète du projet
-- **Progression.txt** : Timeline et métriques détaillées
-- **ETAPE2-6_*.txt** : Documentation technique de chaque phase
-- Chaque bug corrigé documenté avec sa solution
+### Flux d'exécution : `exec-code.lisp`
 
-### Conclusion
+1. **Chargement** : Charge `code.lisp` (fonction à compiler)
+2. **Compilation** : `compiler-simplified.lisp` génère du code MIPS
+3. **Chargement VM** : Les instructions MIPS sont chargées en mémoire
+4. **Exécution** : La VM exécute le code et retourne le résultat
 
-Le compilateur est **fonctionnel, testé et documenté** :
-- ✅ Compile correctement 96.6% des constructions LISP
-- ✅ Génère du code MIPS optimisé et correct
-- ✅ Supporte des features avancées (LOOP, &key, recursion)
-- ✅ Architecture professionnelle et extensible
-- ⚠️ Limitation VM documentée et compréhensible
+### Flux d'exécution : `exec-code-bootstrap.lisp`
 
-**Le projet démontre une maîtrise complète des principes de compilation et constitue une base solide pour des extensions futures.**
+1. **Meta-compilation** : Compile le compilateur lui-même en MIPS (~2600 instructions)
+2. **Chargement VM0** : Charge le compilateur compilé dans une VM
+3. **Construction** : Construit l'expression à compiler en mémoire VM
+4. **Compilation dans VM** : Le compilateur (en MIPS) compile la fonction
+5. **Extraction** : Récupère le code généré via marshalling
+6. **Exécution VM1** : Charge et exécute le code dans une nouvelle VM
 
-## 📄 Licence
+**Résultat** : Le code a été compilé par un compilateur s'exécutant dans la VM !
 
-Projet académique - TD LISP 2025
+---
 
-## 👥 Auteur
+## 🧩 Fonctionnalités avancées
 
-Anthony Hommais  
-Développé dans le cadre du TD LISP - Machine Virtuelle et Bootstrap  
-*Octobre - Décembre 2025*
+### FFI (Foreign Function Interface)
+
+La VM peut **déléguer** l'exécution de fonctions inconnues au Lisp natif :
+
+```lisp
+;; Dans la VM MIPS :
+JAL print-debug  ; La VM ne connaît pas cette fonction
+
+;; Le système FFI intercepte l'appel et :
+;; 1. Détecte que "print-debug" est un symbole
+;; 2. Cherche la fonction Lisp native correspondante
+;; 3. Exécute la fonction native avec les arguments de la VM
+;; 4. Retourne le résultat dans $V0
+```
+
+### Marshalling
+
+Le système de **marshalling** permet de retourner des structures complexes (listes) depuis la VM :
+
+```lisp
+;; Problème : $V0 ne peut contenir qu'un entier, pas une liste
+
+;; Solution : Handles
+(defun compile-from-handle-with-handle-return (handle)
+  (let ((code (compile-from-handle handle)))  ; Génère une liste
+    (vm-store-lisp-object code)))             ; Retourne un handle (entier)
+
+;; Récupération :
+(let ((result-handle (vm-call-function ...)))
+  (vm-get-lisp-object result-handle))  ; Récupère la liste depuis le handle
+```
+
+---
+
+## 📊 Exemples de sortie
+
+### `exec-code.lisp` - Fibonacci(20)
+
+```
+════════════════════════════════════════════════════════════════
+ÉTAPE 4: Résultat
+════════════════════════════════════════════════════════════════
+
+Résultat: fibo(20) = 6765
+✓ Exécution terminée en 11.532 secondes
+```
+
+### `show-compile.lisp` - Affichage du code MIPS
+
+```
+════════════════════════════════════════════════════════════════
+CODE MIPS GÉNÉRÉ POUR: FIBO
+════════════════════════════════════════════════════════════════
+
+Total instructions: 79
+
+Analyse du code:
+  ├─ Sauts/Branches:   8
+  ├─ Arithmétique:     17
+  ├─ Loads (LW):       18
+  ├─ Stores (SW):      15
+  └─ Autres:           15
+```
+
+### `exec-code-bootstrap.lisp` - Bootstrap complet
+
+```
+════════════════════════════════════════════════════════════════
+ÉTAPE 6: Résultat et statistiques
+════════════════════════════════════════════════════════════════
+
+Résultat: fibo(20) = 6765
+✓ RÉSULTAT CORRECT! (attendu: 6765)
+
+Statistiques de délégation CLISP:
+──────────────────────────────────
+Total: 0 appels délégués
+```
+
+### `show-compile-bootstrap.lisp` - Vérification
+
+```
+════════════════════════════════════════════════════════════════
+RÉSUMÉ:
+════════════════════════════════════════════════════════════════
+
+✓ Compilateur compilé et chargé (2598 instructions)
+✓ Expression Fibonacci construite en mémoire (handle 1027)
+✓ Compilation avec marshalling (handle → liste)
+✓ Handle résultat: 5003 → Liste de 79 instructions
+✅ Code identique au compilateur natif
+```
+
+---
+
+## 🎓 Comprendre le code
+
+### Anatomie de `code.lisp`
+
+```lisp
+;;;; 1. DÉFINITION DE LA FONCTION (obligatoire)
+(defparameter *function-definition*
+  '(defun fibo (n)
+     (if (< n 2)
+         n
+         (+ (fibo (- n 1)) (fibo (- n 2))))))
+
+;;;; 2. PARAMÈTRES D'EXÉCUTION (pour exec-code.lisp et exec-code-bootstrap.lisp)
+(defparameter *function-name* 'FIBO)          ; Nom de la fonction
+(defparameter *function-args* '(20))          ; Arguments à passer
+(defparameter *expected-result* 6765)         ; Résultat attendu (validation)
+```
+
+**Utilisé par** :
+- `show-compile.lisp` : utilise `*function-definition*` pour compiler
+- `show-compile-bootstrap.lisp` : idem
+- `exec-code.lisp` : utilise tout (compile + exécute + vérifie)
+- `exec-code-bootstrap.lisp` : idem
+
+### Comprendre les fichiers `exec-*` vs `show-*`
+
+| Type | Fonction | Compilateur | Sortie |
+|------|----------|-------------|--------|
+| `exec-code.lisp` | Compile + **Exécute** | Natif | Résultat du calcul |
+| `show-compile.lisp` | Compile + **Affiche** | Natif | Instructions MIPS |
+| `exec-code-bootstrap.lisp` | Compile + **Exécute** | **Bootstrappé** (dans VM) | Résultat du calcul |
+| `show-compile-bootstrap.lisp` | Compile + **Affiche** | **Bootstrappé** (dans VM) | Instructions MIPS + vérification |
+
+**Natif** = Le compilateur Lisp s'exécute directement en Lisp  
+**Bootstrappé** = Le compilateur est d'abord compilé en MIPS et s'exécute dans la VM
+
+---
+
+## 🔍 Détail des fichiers `src/`
+
+### `vm.lisp` - La Machine Virtuelle
+
+**Responsabilités** :
+- Interpréter les instructions MIPS (ADD, SUB, LW, SW, JAL, BEQ, etc.)
+- Gérer 32 registres ($0-$31) + PC + HI/LO
+- Gérer la mémoire (10 Mo divisée en segments : code, données, pile, tas)
+- Implémenter le FFI (délégation vers Lisp natif)
+- Système de marshalling (handles pour structures complexes)
+
+**Structures principales** :
+```lisp
+(defstruct vm
+  memory          ; Vecteur de 10M mots
+  registers       ; 32 registres MIPS
+  pc              ; Program Counter
+  running         ; État d'exécution
+  ...)
+```
+
+**Instructions supportées** : ADD, ADDI, SUB, MUL, DIV, AND, OR, XOR, SLT, LW, SW, BEQ, BNE, J, JAL, JR, SYSCALL
+
+### `compiler-simplified.lisp` - Le Compilateur
+
+**Responsabilités** :
+- Analyser le code Lisp (AST)
+- Gérer les environnements (variables locales, portée)
+- Générer du code MIPS optimisé
+- Compiler : `if`, `let`, `defun`, appels de fonction, récursivité
+
+**Structures principales** :
+```lisp
+(defstruct compiler-env
+  bindings        ; Variables locales
+  parent          ; Environnement parent (pour portée)
+  frame-size      ; Taille du frame de pile
+  ...)
+```
+
+**Processus de compilation** :
+1. **Analyse** : Parcourt l'AST Lisp
+2. **Génération** : Produit des instructions MIPS
+3. **Optimisation** : Allocation registres, gestion pile
+4. **Linking** : Résout les labels et adresses
+
+### `loader.lisp` - Le Chargeur
+
+**Responsabilités** :
+- Charger le code MIPS en mémoire VM
+- Résoudre les adresses et labels
+- Initialiser le compteur programme (PC)
+
+**Fonction principale** :
+```lisp
+(defun load-code (vm code)
+  "Charge une liste d'instructions MIPS dans la mémoire de la VM"
+  ...)
+```
+
+### `asm-ops.lisp` - Définitions MIPS
+
+**Contenu** :
+- Définition des 32 registres MIPS ($0-$31, $sp, $ra, $v0, etc.)
+- Opcodes des instructions (ADD=32, SUB=34, LW=35, SW=43, etc.)
+- Fonctions de création d'instructions (make-add, make-lw, make-sw, etc.)
+
+**Exemple** :
+```lisp
+(defparameter $sp 29 "Stack pointer")
+(defparameter $ra 31 "Return address")
+(defparameter $v0 2  "Return value")
+
+(defun make-add (rd rs rt)
+  "Crée instruction: ADD rd, rs, rt"
+  (list 'ADD rd rs rt))
+```
+
+### `utils-bootstrap.lisp` - Outils Bootstrap
+
+**Responsabilités** :
+- Fonctions pour compiler le compilateur dans la VM
+- Construire des expressions Lisp en mémoire VM
+- Marshalling avancé (handle-based returns)
+
+**Fonctions clés** :
+```lisp
+(defun compile-from-handle (handle)
+  "Compile une expression stockée via handle")
+
+(defun compile-from-handle-with-handle-return (handle)
+  "Compile et retourne un handle vers le résultat")
+
+(defun build-expression-in-vm (expr)
+  "Construit une expression Lisp en mémoire VM")
+```
+
+### `utils.lisp` - Utilitaires Généraux
+
+**Contenu** :
+- Fonctions d'affichage formaté
+- Outils de debug
+- Helpers divers
+
+---
+
+## 🧪 Développement et tests
+
+### Ajouter une nouvelle fonction
+
+1. Éditez `code.lisp` :
+```lisp
+(defparameter *function-definition*
+  '(defun ma-fonction (x y)
+     (+ (* x x) (* y y))))
+
+(defparameter *function-name* 'MA-FONCTION)
+(defparameter *function-args* '(3 4))
+(defparameter *expected-result* 25)
+```
+
+2. Testez :
+```bash
+clisp exec-code.lisp              # Vérifie que ça fonctionne
+clisp show-compile.lisp           # Examine le code généré
+clisp exec-code-bootstrap.lisp    # Vérifie le bootstrap
+```
+
+### Debug
+
+Si un programme échoue :
+1. Vérifiez `code.lisp` (syntaxe, résultat attendu)
+2. Lancez `show-compile.lisp` pour voir le code MIPS
+3. Utilisez les statistiques de délégation pour identifier les problèmes FFI
+
+---
+
+## 📚 Ressources
+
+### Concepts clés
+
+- **MIPS** : Architecture RISC (Reduced Instruction Set Computer)
+- **Bootstrap** : Un compilateur qui se compile lui-même
+- **VM** : Machine virtuelle, interpréteur d'un jeu d'instructions
+- **FFI** : Foreign Function Interface, appel de fonctions externes
+- **Marshalling** : Sérialisation de données complexes
+
+### Architecture MIPS simplifiée
+
+```
+Registres:
+  $0      : toujours zéro
+  $v0-$v1 : valeurs de retour
+  $a0-$a3 : arguments de fonction
+  $t0-$t9 : temporaires
+  $sp     : stack pointer
+  $ra     : return address
+
+Mémoire:
+  0x00000000 - 0x00100000 : Code
+  0x00100000 - 0x00500000 : Données/Tas
+  0x00500000 - 0x00A00000 : Pile (croît vers le bas)
+```
+
+---
+
+## 🎯 Pour résumer
+
+- **Vous modifiez** : `code.lisp` uniquement
+- **Vous exécutez** : `exec-code.lisp` ou `exec-code-bootstrap.lisp`
+- **Vous visualisez** : `show-compile.lisp` ou `show-compile-bootstrap.lisp`
+- **Le système fait** : Compilation, exécution, vérification automatique
+
+**C'est tout ! Le reste est géré par les fichiers dans `src/`.**

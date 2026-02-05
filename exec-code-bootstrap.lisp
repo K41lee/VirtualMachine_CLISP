@@ -12,7 +12,7 @@
 (initialize-compiler-symbols)
 
 (load "src/compiler-simplified.lisp")
-(load "utils-bootstrap.lisp")
+(load "src/utils-bootstrap.lisp")
 
 ;; Charger le code depuis code.lisp
 (load "code.lisp")

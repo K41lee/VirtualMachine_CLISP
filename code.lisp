@@ -44,6 +44,19 @@
 ;; Pour tester une autre fonction, décommentez l'une des sections ci-dessous
 ;; et commentez la section fibonacci ci-dessus.
 
+;; FIBONACCI
+;;(defparameter *function-definition*
+;;  '(defun fibo (n)
+;;     (if (< n 2)
+;;         n
+;;         (+ (fibo (- n 1)) (fibo (- n 2)))))
+;; (defparameter *function-name* 'FIBO
+;;  "Nom de la fonction à appeler (symbole en majuscules)")
+;;(defparameter *function-args* '(20)
+;;  "Arguments à passer à la fonction lors de l'exécution")
+;;(defparameter *expected-result* 6765
+;;  "Résultat attendu pour vérification")
+
 ;; FACTORIELLE
 ;; (defparameter *function-definition*
 ;;   '(defun fact (n)

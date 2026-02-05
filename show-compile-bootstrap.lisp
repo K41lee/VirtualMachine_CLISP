@@ -11,7 +11,7 @@
 (initialize-compiler-symbols)
 
 (load "src/compiler-simplified.lisp")
-(load "utils-bootstrap.lisp")
+(load "src/utils-bootstrap.lisp")
 
 ;; Charger le code depuis code.lisp
 (load "code.lisp")
@@ -132,8 +132,8 @@
           count (length *compiler-code*)))
 
 ;; Lire et compiler les fonctions utilitaires de bootstrap
-(format t "~%Lecture de utils-bootstrap.lisp...~%")
-(defparameter *utils-sexps* (read-file-as-sexps "utils-bootstrap.lisp"))
+(format t "~%Lecture de src/utils-bootstrap.lisp...~%")
+(defparameter *utils-sexps* (read-file-as-sexps "src/utils-bootstrap.lisp"))
 (defparameter *utils-defuns*
   (remove-if-not (lambda (sexp)
                    (and (listp sexp)
