@@ -13,6 +13,9 @@
 (load "src/compiler-simplified.lisp")
 (load "utils-bootstrap.lisp")
 
+;; Charger le code depuis code.lisp
+(load "code.lisp")
+
 ;;; ============================================================================
 ;;; Fonction utilitaire pour afficher le code
 ;;; ============================================================================
@@ -228,21 +231,14 @@
 ;;; ÉTAPE 4: Construction de l'expression Fibonacci
 ;;; ============================================================================
 
-(format t "~%ÉTAPE 4: Construction de l'expression Fibonacci~%")
+(format t "~%ÉTAPE 4: Construction de l'expression ~A~%" (second *function-definition*))
 (format t "────────────────────────────────────────────────────────────────~%")
 
-(defparameter *fibonacci-def*
-  '(defun fibo (n)
-     (if (< n 2)
-         n
-         (+ (fibo (- n 1)) (fibo (- n 2))))))
+;; Utiliser la définition depuis code.lisp
+(defparameter *fibonacci-def* *function-definition*)
 
 (format t "~%Expression Lisp:~%")
-(format t "(defun fibo (n)~%")
-(format t "  (if (< n 2)~%")
-(format t "      n~%")
-(format t "      (+ (fibo (- n 1))~%")
-(format t "         (fibo (- n 2)))))~%")
+(format t "~S~%" *function-definition*)
 
 (format t "~%Construction en mémoire VM...~%")
 (defparameter *fibo-handle* (build-expression-in-vm *fibonacci-def*))

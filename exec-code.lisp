@@ -12,6 +12,9 @@
 
 (load "src/compiler-simplified.lisp")
 
+;; Charger le code depuis code.lisp
+(load "code.lisp")
+
 ;;; ============================================================================
 ;;; Configuration
 ;;; ============================================================================
@@ -19,17 +22,6 @@
 (format t "~%╔════════════════════════════════════════════════════════════════╗~%")
 (format t "║            COMPILATION ET EXÉCUTION DE CODE LISP               ║~%")
 (format t "╚════════════════════════════════════════════════════════════════╝~%")
-
-;; Fonction à compiler et exécuter
-(defparameter *function-to-compile*
-  '(defun fibo (n)
-     (if (< n 2)
-         n
-         (+ (fibo (- n 1)) (fibo (- n 2))))))
-
-;; Arguments pour l'exécution
-(defparameter *function-name* 'FIBO)
-(defparameter *function-args* '(20))  ; fibo(20)
 
 ;;; ============================================================================
 ;;; ÉTAPE 1: Compilation
@@ -41,7 +33,7 @@
 
 (format t "~%Compilation en cours...~%")
 (defparameter *compiled-code* 
-  (compile-lisp-to-mips-simplified *function-to-compile*))
+  (compile-lisp-to-mips-simplified *function-definition*))
 
 (format t "✓ Compilation réussie!~%")
 (format t "✓ ~A instructions MIPS générées~%" (length *compiled-code*))

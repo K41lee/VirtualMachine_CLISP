@@ -12,6 +12,9 @@
 
 (load "src/compiler-simplified.lisp")
 
+;; Charger le code depuis code.lisp
+(load "code.lisp")
+
 ;;; ============================================================================
 ;;; Fonction utilitaire pour afficher le code
 ;;; ============================================================================
@@ -41,26 +44,19 @@
       (format t "~A~A~%" indent instr)))
 
 ;;; ============================================================================
-;;; Fonction à compiler: FIBONACCI
+;;; Fonction à compiler
 ;;; ============================================================================
 
 (format t "~%╔════════════════════════════════════════════════════════════════╗~%")
-(format t "║              COMPILATION DE FIBONACCI                          ║~%")
+(format t "║              COMPILATION DE ~A~40T║~%" (second *function-definition*))
 (format t "╚════════════════════════════════════════════════════════════════╝~%")
 
-(defparameter *fibonacci-def*
-  '(defun fibo (n)
-     (if (< n 2)
-         n
-         (+ (fibo (- n 1)) (fibo (- n 2))))))
+;; Utiliser la définition depuis code.lisp
+(defparameter *fibonacci-def* *function-definition*)
 
 (format t "~%Expression Lisp:~%")
 (format t "────────────────────────────────────────────────────────────────~%")
-(format t "(defun fibo (n)~%")
-(format t "  (if (< n 2)~%")
-(format t "      n~%")
-(format t "      (+ (fibo (- n 1))~%")
-(format t "         (fibo (- n 2)))))~%")
+(format t "~S~%" *function-definition*)
 
 ;;; ============================================================================
 ;;; Compilation

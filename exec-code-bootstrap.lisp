@@ -14,6 +14,9 @@
 (load "src/compiler-simplified.lisp")
 (load "utils-bootstrap.lisp")
 
+;; Charger le code depuis code.lisp
+(load "code.lisp")
+
 ;;; ============================================================================
 ;;; Configuration
 ;;; ============================================================================
@@ -24,18 +27,6 @@
 
 ;; Activer la délégation CLISP pour les fonctions de base
 (setf *vm-delegate-to-lisp* t)
-
-;; Fonction à compiler et exécuter
-(defparameter *function-to-compile*
-  '(defun fibo (n)
-     (if (< n 2)
-         n
-         (+ (fibo (- n 1)) (fibo (- n 2))))))
-
-;; Arguments pour l'exécution
-(defparameter *function-name* 'FIBO)
-(defparameter *function-args* '(20))  ; fibo(20) pour tester
-(defparameter *expected-result* 6765)
 
 ;;; ============================================================================
 ;;; ÉTAPE 1: Enregistrer les fonctions CLISP déléguées
@@ -135,12 +126,12 @@
 
 (format t "~%════════════════════════════════════════════════════════════════~%")
 (format t "ÉTAPE 4: Compilation de ~A avec le compilateur BOOTSTRAPPÉ~%"
-        (second *function-to-compile*))
+        (second *function-definition*))
 (format t "════════════════════════════════════════════════════════════════~%")
 
 (format t "~%Construction de l'expression en mémoire VM...~%")
 (defparameter *expr-handle* 
-  (build-expression-in-vm *function-to-compile*))
+  (build-expression-in-vm *function-definition*))
 
 (format t "✓ Expression construite, handle: ~A~%" *expr-handle*)
 
