@@ -27,9 +27,9 @@
         ;; Ne pas inclure les labels dans le code final
         (let ((resolved-instr 
                (mapcar (lambda (element)
-                         (if (and (symbolp element)
+                         (if (and (or (symbolp element) (stringp element))
                                   (gethash element labels))
-                             ;; Remplacer le symbole par son adresse
+                             ;; Remplacer le symbole/string par son adresse
                              (gethash element labels)
                              ;; Sinon garder l'élément tel quel
                              element))
@@ -43,22 +43,48 @@
 
 (defun keyword-to-symbol (kw)
   "Convertit un keyword en symbole (nécessaire pour compatibilité VM)
-   :ADDI → ADDI, :$SP → $SP, etc."
-  (if (keywordp kw)
-      (intern (symbol-name kw))
-      kw))
+   :ADDI → ADDI, :$SP → $SP, etc.
+   Gère aussi strings, nombres, listes et autres types"
+  (cond
+    ((null kw) nil)
+    ((keywordp kw) (intern (symbol-name kw)))
+    ((symbolp kw) kw)
+    ((stringp kw) 
+     ;; String: intern si non vide
+     (if (> (length kw) 0)
+         (intern kw)
+         kw))
+    ((numberp kw) kw)
+    ((listp kw) (mapcar #'keyword-to-symbol kw))
+    (t kw)))
+
+(defun is-comment-instruction (instr)
+  "Teste si une instruction est un commentaire"
+  (and (listp instr)
+       (or (eq (first instr) 'COMMENT)
+           (eq (first instr) :COMMENT)
+           (equal (first instr) "COMMENT"))))
 
 (defun normalize-instruction (instr)
-  "Convertit tous les keywords d'une instruction en symboles"
+  "Convertit tous les keywords d'une instruction en symboles
+   Filtre aussi les instructions COMMENT"
   (cond
     ((null instr) nil)
+    ((is-comment-instruction instr) nil)  ;; COMMENT → NIL (sera filtré)
     ((keywordp instr) (keyword-to-symbol instr))
-    ((listp instr) (mapcar #'normalize-instruction instr))
+    ((symbolp instr) instr)
+    ((stringp instr) (keyword-to-symbol instr))
+    ((numberp instr) instr)
+    ((listp instr) 
+     (let ((normalized (mapcar #'normalize-instruction instr)))
+       (if (member nil normalized)
+           nil  ;; Si contient NIL (COMMENT), retourner NIL
+           normalized)))
     (t instr)))
 
 (defun normalize-code (asm-code)
-  "Normalise tout le code assembleur (keywords → symboles)"
-  (mapcar #'normalize-instruction asm-code))
+  "Normalise tout le code assembleur (keywords → symboles) et filtre COMMENT"
+  (remove nil (mapcar #'normalize-instruction asm-code)))
 
 ;;; ============================================================================
 ;;; PARSING ET VALIDATION
@@ -77,11 +103,34 @@
     (t (error "Format de code invalide: ~A" code))))
 
 (defun preprocess-code (asm-code code-start)
-  "Prétraite le code assembleur (résolution des labels, etc.)"
+  "Prétraite le code assembleur (résolution des labels, objets Lisp, etc.)"
   (let* ((parsed (parse-asm asm-code))
-         (labels (collect-labels parsed code-start))
-         (resolved (resolve-labels parsed labels)))
+         ;; Étape 0: Filtrer les instructions COMMENT
+         (filtered (remove-if #'is-comment-instruction parsed))
+         ;; Étape 1: Résoudre les objets Lisp (LISP-OBJECT)
+         (with-lisp-objects (resolve-lisp-objects filtered))
+         ;; Étape 2: Collecter et résoudre les labels
+         (labels (collect-labels with-lisp-objects code-start))
+         (resolved (resolve-labels with-lisp-objects labels)))
     (values resolved labels)))
+
+(defun resolve-lisp-objects (asm-code)
+  "Remplace les instructions LISP-OBJECT par des LI avec handles
+   Format: (:LISP-OBJECT objet registre) → (:LI handle registre)"
+  (mapcar (lambda (instr)
+            (if (and (listp instr) 
+                     (eq (first instr) :LISP-OBJECT))
+                ;; Créer un handle pour cet objet Lisp
+                (let* ((obj (second instr))
+                       (reg (third instr))
+                       (handle (incf *vm-lisp-handle-counter*)))
+                  ;; Stocker l'objet dans la hash-table
+                  (setf (gethash handle *vm-lisp-objects*) obj)
+                  ;; Remplacer par une instruction LI
+                  (list :LI handle reg))
+                ;; Sinon garder l'instruction telle quelle
+                instr))
+          asm-code))
 
 ;;; ============================================================================
 ;;; CHARGEMENT EN MÉMOIRE

@@ -1,0 +1,36 @@
+;;;; test-fibo5.lisp
+(load "src/vm.lisp")
+(load "src/loader.lisp")
+(load "src/compiler.lisp")
+(load "src/compiler-simplified.lisp")
+
+(defvar *fibo* '(defun fibo (n) (if (< n 2) n (+ (fibo (- n 1)) (fibo (- n 2))))))
+
+(format t "~%Test fibo(5)...~%~%")
+(defvar *code* (compile-lisp-to-mips-simplified *fibo*))
+(defvar *vm* (make-new-vm))
+(load-code *vm* *code*)
+(set-register *vm* :$A0 5)
+(run-vm *vm* :max-instructions 1000)
+(format t "Résultat: fibo(5) = ~A (attendu 5)~%~%" (get-register *vm* :$V0))
+
+(format t "Test fibo(3)...~%~%")
+(defvar *vm2* (make-new-vm))
+(load-code *vm2* *code*)
+(set-register *vm2* :$A0 3)
+(run-vm *vm2* :max-instructions 100)
+(format t "Résultat: fibo(3) = ~A (attendu 2)~%~%" (get-register *vm2* :$V0))
+
+(format t "Test fibo(1)...~%~%")
+(defvar *vm3* (make-new-vm))
+(load-code *vm3* *code*)
+(set-register *vm3* :$A0 1)
+(run-vm *vm3* :max-instructions 50)
+(format t "Résultat: fibo(1) = ~A (attendu 1)~%~%" (get-register *vm3* :$V0))
+
+(format t "Test fibo(0)...~%~%")
+(defvar *vm4* (make-new-vm))
+(load-code *vm4* *code*)
+(set-register *vm4* :$A0 0)
+(run-vm *vm4* :max-instructions 50)
+(format t "Résultat: fibo(0) = ~A (attendu 0)~%~%" (get-register *vm4* :$V0))

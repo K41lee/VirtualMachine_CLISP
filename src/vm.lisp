@@ -21,12 +21,22 @@
 (defparameter *vm-lisp-handle-counter* 5000
   "Compteur pour générer des handles uniques pour les objets Lisp")
 
+(defparameter *vm-arrays* (make-hash-table)
+  "Mapping: handle → array Lisp natif
+   Permet au code compilé d'utiliser des tableaux sans gestion manuelle de la mémoire")
+
+(defparameter *vm-array-handle-counter* 10000
+  "Compteur pour générer des handles uniques pour les tableaux")
+
 (defun reset-vm-hash-tables ()
-  "Réinitialise les tables de hash-tables et objets Lisp"
+  "Réinitialise les tables de hash-tables, objets Lisp et tableaux"
   (clrhash *vm-hash-tables*)
   (clrhash *vm-lisp-objects*)
+  (clrhash *vm-arrays*)
   (setf *vm-hash-handle-counter* 1000)
-  (setf *vm-lisp-handle-counter* 5000))
+  (setf *vm-lisp-handle-counter* 5000)
+  (setf *vm-array-handle-counter* 10000)
+  (setf *heap-pointer* +heap-start+))
 
 ;;; ============================================================================
 ;;; GESTION DU TAS DYNAMIQUE (PHASE 9 - CLOSURES)
@@ -56,6 +66,150 @@
     addr))
 
 ;;; ============================================================================
+;;; GESTION DES TABLEAUX (ARRAYS)
+;;; ============================================================================
+
+(defun vm-store-array (vm array)
+  "Stocke un tableau Lisp natif et retourne son handle unique"
+  (let ((handle (incf *vm-array-handle-counter*)))
+    (setf (gethash handle *vm-arrays*) array)
+    (when (vm-verbose vm)
+      (format t "  STORE-ARRAY: Tableau de ~A éléments, handle ~A~%" 
+              (length array) handle))
+    handle))
+
+(defun vm-get-array (vm handle)
+  "Récupère un tableau Lisp natif depuis son handle"
+  (let ((array (gethash handle *vm-arrays*)))
+    (unless array
+      (error "ARRAY: Handle invalide ~A" handle))
+    array))
+
+;;; ============================================================================
+;;; SYSTÈME D'INTERNING DE SYMBOLES
+;;; ============================================================================
+
+(defvar *vm-symbol-to-id* (make-hash-table :test 'equal)
+  "Table: nom de symbole (string) → ID numérique")
+
+(defvar *vm-id-to-symbol* (make-hash-table :test 'eql)
+  "Table: ID numérique → nom de symbole (string)")
+
+(defvar *vm-next-symbol-id* 1
+  "Prochain ID disponible pour un symbole")
+
+(defvar *vm-globals* (make-hash-table :test 'eq)
+  "Table des variables globales: symbole → valeur")
+
+(defun intern-symbol (symbol-name)
+  "Retourne l'ID d'un symbole, le crée si nécessaire"
+  (let ((existing-id (gethash symbol-name *vm-symbol-to-id*)))
+    (if existing-id
+        existing-id
+        ;; Créer nouveau symbole
+        (let ((new-id *vm-next-symbol-id*))
+          (setf (gethash symbol-name *vm-symbol-to-id*) new-id)
+          (setf (gethash new-id *vm-id-to-symbol*) symbol-name)
+          (incf *vm-next-symbol-id*)
+          new-id))))
+
+(defun symbol-name-from-id (symbol-id)
+  "Retourne le nom d'un symbole depuis son ID"
+  (gethash symbol-id *vm-id-to-symbol*))
+
+(defun symbol-id-to-keyword (symbol-id)
+  "Convertit un ID de symbole en keyword (pour les registres)"
+  (let ((name (symbol-name-from-id symbol-id)))
+    (when name
+      (intern name :keyword))))
+
+(defun initialize-compiler-symbols ()
+  "Pré-intern les symboles utilisés par le compilateur"
+  ;; Instructions MIPS
+  (intern-symbol "LI")
+  (intern-symbol "LW")
+  (intern-symbol "SW")
+  (intern-symbol "ADD")
+  (intern-symbol "SUB")
+  (intern-symbol "ADDI")
+  (intern-symbol "LIST")
+  (intern-symbol "MUL")
+  (intern-symbol "DIV")
+  (intern-symbol "BEQ")
+  (intern-symbol "BNE")
+  (intern-symbol "BLT")
+  (intern-symbol "BGT")
+  (intern-symbol "J")
+  (intern-symbol "JAL")
+  (intern-symbol "JR")
+  (intern-symbol "JALR")
+  (intern-symbol "MOVE")
+  (intern-symbol "PUSH")
+  (intern-symbol "POP")
+  (intern-symbol "HALT")
+  (intern-symbol "LABEL")
+  (intern-symbol "MFLO")
+  (intern-symbol "MFHI")
+  (intern-symbol "GLOBAL-GET")
+  (intern-symbol "GLOBAL-SET")
+  ;; Registres
+  (intern-symbol "$V0")
+  (intern-symbol "$V1")
+  (intern-symbol "$A0")
+  (intern-symbol "$A1")
+  (intern-symbol "$A2")
+  (intern-symbol "$A3")
+  (intern-symbol "$T0")
+  (intern-symbol "$T1")
+  (intern-symbol "$T2")
+  (intern-symbol "$T3")
+  (intern-symbol "$S0")
+  (intern-symbol "$S1")
+  (intern-symbol "$SP")
+  (intern-symbol "$FP")
+  (intern-symbol "$RA")
+  (intern-symbol "$ZERO")
+  ;; Keywords Lisp
+  (intern-symbol "DEFUN")
+  (intern-symbol "IF")
+  (intern-symbol "LET")
+  (intern-symbol "QUOTE")
+  (intern-symbol "LAMBDA")
+  (intern-symbol "NIL")
+  (intern-symbol "T")
+  (intern-symbol "COND")
+  (intern-symbol "AND")
+  (intern-symbol "OR")
+  (intern-symbol "NOT"))
+
+(defun initialize-global-variables ()
+  "Initialise les variables globales utilisées par le compilateur"
+  ;; Registres
+  (setf (gethash '*reg-v0* *vm-globals*) (intern-symbol "$V0"))
+  (setf (gethash '*reg-v1* *vm-globals*) (intern-symbol "$V1"))
+  (setf (gethash '*reg-a0* *vm-globals*) (intern-symbol "$A0"))
+  (setf (gethash '*reg-a1* *vm-globals*) (intern-symbol "$A1"))
+  (setf (gethash '*reg-a2* *vm-globals*) (intern-symbol "$A2"))
+  (setf (gethash '*reg-a3* *vm-globals*) (intern-symbol "$A3"))
+  (setf (gethash '*reg-t0* *vm-globals*) (intern-symbol "$T0"))
+  (setf (gethash '*reg-t1* *vm-globals*) (intern-symbol "$T1"))
+  (setf (gethash '*reg-t2* *vm-globals*) (intern-symbol "$T2"))
+  (setf (gethash '*reg-t3* *vm-globals*) (intern-symbol "$T3"))
+  (setf (gethash '*reg-sp* *vm-globals*) (intern-symbol "$SP"))
+  (setf (gethash '*reg-fp* *vm-globals*) (intern-symbol "$FP"))
+  (setf (gethash '*reg-ra* *vm-globals*) (intern-symbol "$RA"))
+  (setf (gethash '*reg-s0* *vm-globals*) (intern-symbol "$S0"))
+  (setf (gethash '*reg-s1* *vm-globals*) (intern-symbol "$S1"))
+  ;; Instructions
+  (setf (gethash '*instr-li* *vm-globals*) (intern-symbol "LI"))
+  (setf (gethash '*instr-lw* *vm-globals*) (intern-symbol "LW"))
+  (setf (gethash '*instr-sw* *vm-globals*) (intern-symbol "SW"))
+  (setf (gethash '*instr-add* *vm-globals*) (intern-symbol "ADD"))
+  (setf (gethash '*instr-sub* *vm-globals*) (intern-symbol "SUB"))
+  (setf (gethash '*instr-addi* *vm-globals*) (intern-symbol "ADDI"))
+  (setf (gethash '*instr-list* *vm-globals*) (intern-symbol "LIST")))
+
+;;; ============================================================================
 ;;; STRUCTURE DE LA VM
 ;;; ============================================================================
 
@@ -79,6 +233,8 @@
 (defun make-new-vm (&key (verbose nil))
   "Crée et initialise une nouvelle VM"
   (reset-vm-hash-tables)  ; Réinitialiser les tables globales
+  (initialize-compiler-symbols)  ; Pré-intern les symboles du compilateur
+  (initialize-global-variables)  ; Initialiser les variables globales
   (let ((vm (make-vm :verbose verbose)))
     (init-registers vm)
     (init-memory-layout vm)
@@ -255,7 +411,13 @@
 (defun get-value (vm operand)
   "Récupère la valeur d'un opérande (registre ou valeur immédiate)"
   (cond
-    ;; Si c'est un registre, récupérer sa valeur
+    ;; Si c'est un ID de symbole de registre, le convertir
+    ((and (numberp operand) (fboundp 'symbol-id-to-keyword))
+     (let ((keyword-reg (symbol-id-to-keyword operand)))
+       (if (and keyword-reg (register-p keyword-reg))
+           (get-value vm keyword-reg)
+           operand)))  ; Sinon c'est un nombre normal
+    ;; Si c'est un registre keyword, récupérer sa valeur
     ((register-p operand)
      (let ((val (get-register vm operand))
            (zero-reg (get-reg :zero)))
@@ -269,12 +431,16 @@
 
 (defun set-value (vm operand value)
   "Définit la valeur d'un opérande (doit être un registre)"
-  (unless (register-p operand)
-    (error "La destination doit être un registre: ~A" operand))
-  ;; $zero ne peut pas être modifié (convention MIPS)
-  (let ((zero-reg (get-reg :zero)))
-    (unless (eq operand zero-reg)
-      (set-register vm operand value))))
+  ;; Convertir ID en keyword si nécessaire
+  (let ((reg (if (and (numberp operand) (fboundp 'symbol-id-to-keyword))
+                 (or (symbol-id-to-keyword operand) operand)
+                 operand)))
+    (unless (register-p reg)
+      (error "La destination doit être un registre: ~A (ID: ~A)" reg operand))
+    ;; $zero ne peut pas être modifié (convention MIPS)
+    (let ((zero-reg (get-reg :zero)))
+      (unless (eq reg zero-reg)
+        (set-register vm reg value)))))
 
 (defun execute-instruction (vm instr)
   "Exécute une instruction"
@@ -285,6 +451,10 @@
   
   (let ((opcode (first instr))
         (args (rest instr)))
+    ;; Convertir ID numérique en keyword si nécessaire
+    (when (numberp opcode)
+      (setf opcode (symbol-id-to-keyword opcode)))
+    
     ;; PHASE 9 FIX: Ignorer les LABEL (utilisés pour les sauts, pas pour l'exécution)
     (when (eq opcode :LABEL)
       (return-from execute-instruction))
@@ -486,6 +656,36 @@
                    (val1 (get-value vm src1))
                    (val2 (get-value vm src2)))
               (when (> val1 val2)
+                (let* ((code-start (calculate-code-start vm))
+                       (pc-reg (get-reg :pc))
+                       (target-addr (if (>= label code-start)
+                                        label
+                                        (+ code-start label))))
+                  (set-register vm pc-reg target-addr)
+                  (return-from execute-instruction)))))
+      
+      ;; BLE: Branch if Less than or Equal
+      (:BLE (let* ((src1 (first args))
+                   (src2 (second args))
+                   (label (third args))
+                   (val1 (get-value vm src1))
+                   (val2 (get-value vm src2)))
+              (when (<= val1 val2)
+                (let* ((code-start (calculate-code-start vm))
+                       (pc-reg (get-reg :pc))
+                       (target-addr (if (>= label code-start)
+                                        label
+                                        (+ code-start label))))
+                  (set-register vm pc-reg target-addr)
+                  (return-from execute-instruction)))))
+      
+      ;; BGE: Branch if Greater than or Equal
+      (:BGE (let* ((src1 (first args))
+                   (src2 (second args))
+                   (label (third args))
+                   (val1 (get-value vm src1))
+                   (val2 (get-value vm src2)))
+              (when (>= val1 val2)
                 (let* ((code-start (calculate-code-start vm))
                        (pc-reg (get-reg :pc))
                        (target-addr (if (>= label code-start)
@@ -812,6 +1012,34 @@
            (when (vm-verbose vm)
              (format t "  LIST-CDR: ~A -> ~A~%" lst result)))))
       
+      ;; LIST: Crée une liste à partir d'éléments sur la pile
+      ;; Format: (LIST count) ou (:LIST count)
+      ;; Lit 'count' valeurs depuis la pile et crée une liste
+      ;; Effet: $V0 = handle de la liste créée
+      ((LIST :LIST)
+       (let* ((count (first args))
+              (elements nil))
+         ;; Récupérer les éléments de la pile
+         ;; Les éléments sont empilés avec SW puis ADDI $SP, -4, donc ils sont à:
+         ;; 1er élément: $SP + (count * 4)
+         ;; 2ème élément: $SP + ((count-1) * 4)
+         ;; etc.
+         (dotimes (i count)
+           (let* ((offset (* (- count i) 4))  ; Offset depuis $SP: count*4, (count-1)*4, ..., 4
+                  (addr (+ (get-value vm :$sp) offset))
+                  (val (mem-read vm addr)))
+             ;; Résoudre le handle si c'est un objet Lisp
+             (push (gethash val *vm-lisp-objects* val) elements)))
+         ;; Restaurer la pile (dépiler count éléments * 4 octets)
+         (set-value vm :$sp (+ (get-value vm :$sp) (* count 4)))
+         ;; Créer la liste et son handle
+         (let ((result-list (nreverse elements))  ; Inverser car on a pushé en LIFO
+               (handle (incf *vm-lisp-handle-counter*)))
+           (setf (gethash handle *vm-lisp-objects*) result-list)
+           (set-value vm :$v0 handle)
+           (when (vm-verbose vm)
+             (format t "  LIST(~A): ~A -> handle ~A~%" count result-list handle)))))
+      
       ;; LIST-CONS: Crée une paire cons
       ;; Format: (LIST-CONS car-reg cdr-reg)
       ;; Effet: $V0 = handle de (cons car cdr)
@@ -850,6 +1078,72 @@
            (when (vm-verbose vm)
              (format t "  LIST-CADR: ~A -> ~A~%" lst result)))))
       
+      ;; INTERN: Convertit un string en symbole (retourne son ID)
+      ;; Format: (INTERN string-handle-reg)
+      ;; string-handle-reg: registre contenant le handle d'un string
+      ;; Effet: $V0 = ID du symbole
+      (:INTERN
+       (let* ((string-handle-reg (first args))
+              (string-handle (get-value vm string-handle-reg))
+              (string-obj (gethash string-handle *vm-lisp-objects*)))
+         (unless (stringp string-obj)
+           (error "INTERN attend un handle de string, reçu handle ~A -> ~A" 
+                  string-handle string-obj))
+         (let ((symbol-id (intern-symbol string-obj)))
+           (set-value vm :$v0 symbol-id)
+           (when (vm-verbose vm)
+             (format t "  INTERN: ~S -> ID ~A~%" string-obj symbol-id)))))
+      
+      ;; SYMBOL-NAME: Convertit un ID de symbole en string (retourne handle)
+      ;; Format: (SYMBOL-NAME symbol-id-reg)
+      ;; symbol-id-reg: registre contenant l'ID d'un symbole
+      ;; Effet: $V0 = handle du nom du symbole (string)
+      (:SYMBOL-NAME
+       (let* ((symbol-id-reg (first args))
+              (symbol-id (get-value vm symbol-id-reg))
+              (symbol-name (symbol-name-from-id symbol-id)))
+         (if symbol-name
+             (let ((handle (incf *vm-lisp-handle-counter*)))
+               (setf (gethash handle *vm-lisp-objects*) symbol-name)
+               (set-value vm :$v0 handle)
+               (when (vm-verbose vm)
+                 (format t "  SYMBOL-NAME: ID ~A -> ~S (handle ~A)~%" 
+                         symbol-id symbol-name handle)))
+             (progn
+               (set-value vm :$v0 0)
+               (when (vm-verbose vm)
+                 (format t "  SYMBOL-NAME: ID ~A inconnu~%" symbol-id))))))
+      
+      ;; GLOBAL-GET: Lit une variable globale
+      ;; Format: (GLOBAL-GET symbol)
+      ;; symbol: symbole de la variable (ex: *reg-v0*)
+      ;; Effet: $V0 = valeur de la variable globale
+      (:GLOBAL-GET
+       (let* ((symbol (first args))
+              (value (gethash symbol *vm-globals*)))
+         (if value
+             (progn
+               (set-value vm :$v0 value)
+               (when (vm-verbose vm)
+                 (format t "  GLOBAL-GET: ~A -> ~A~%" symbol value)))
+             (progn
+               (set-value vm :$v0 0)
+               (when (vm-verbose vm)
+                 (format t "  GLOBAL-GET: ~A non trouvé~%" symbol))))))
+      
+      ;; GLOBAL-SET: Définit une variable globale
+      ;; Format: (GLOBAL-SET symbol value-reg)
+      ;; symbol: symbole de la variable
+      ;; value-reg: registre contenant la valeur
+      ;; Effet: définit la variable globale
+      (:GLOBAL-SET
+       (let* ((symbol (first args))
+              (value-reg (second args))
+              (value (get-value vm value-reg)))
+         (setf (gethash symbol *vm-globals*) value)
+         (when (vm-verbose vm)
+           (format t "  GLOBAL-SET: ~A = ~A~%" symbol value))))
+      
       ;; ======================================================================
       ;; INSTRUCTIONS DE COMPARAISON (PHASE LOADER)
       ;; ======================================================================
@@ -871,7 +1165,77 @@
          (when (vm-verbose vm)
            (format t "  EQUAL: ~A = ~A -> ~A~%" val1 val2 result))))
       
+      ;; ======================================================================
+      ;; INSTRUCTIONS POUR TABLEAUX (ARRAYS) - Délégué à Lisp
+      ;; ======================================================================
+      ;; Les tableaux sont des objets Lisp natifs stockés dans une table
+      ;; La VM manipule des IDs/références au lieu de gérer la mémoire
+      
+      ;; MAKE-ARRAY: Crée un tableau Lisp natif
+      ;; Format: (MAKE-ARRAY size-reg)
+      ;; size-reg: nombre d'éléments
+      ;; Effet: Crée un vrai tableau Lisp, retourne son ID dans $V0
+      (:MAKE-ARRAY
+       (let* ((size-reg (first args))
+              (size (get-value vm size-reg))
+              ;; Créer un vrai tableau Lisp
+              (array (make-array size :initial-element 0))
+              ;; Générer un ID unique et stocker le tableau
+              (array-id (vm-store-array vm array)))
+         ;; Retourner l'ID dans $V0
+         (set-value vm :$v0 array-id)
+         (when (vm-verbose vm)
+           (format t "  MAKE-ARRAY: Création tableau Lisp de ~A éléments, ID=~A~%" 
+                   size array-id))))
+      
+      ;; AREF: Accède à un élément du tableau
+      ;; Format: (AREF array-id-reg index-reg dest-reg)
+      ;; array-id-reg: ID du tableau
+      ;; index-reg: index de l'élément (0-based)
+      ;; dest-reg: registre destination (typiquement $V0)
+      ;; Effet: dest-reg = array[index]
+      (:AREF
+       (let* ((array-id-reg (first args))
+              (index-reg (second args))
+              (dest-reg (third args))
+              (array-id (get-value vm array-id-reg))
+              (index (get-value vm index-reg))
+              ;; Récupérer le tableau Lisp
+              (array (vm-get-array vm array-id)))
+         ;; Vérifier les bornes (Lisp le fait aussi, mais pour message clair)
+         (when (or (< index 0) (>= index (length array)))
+           (error "AREF: Index hors limites: ~A (taille: ~A)" index (length array)))
+         ;; Lire et retourner l'élément
+         (let ((value (aref array index)))
+           (set-value vm dest-reg value)
+           (when (vm-verbose vm)
+             (format t "  AREF: array[~A] = ~A~%" index value)))))
+      
+      ;; ASET: Modifie un élément du tableau
+      ;; Format: (ASET array-id-reg index-reg value-reg)
+      ;; array-id-reg: ID du tableau
+      ;; index-reg: index de l'élément (0-based)
+      ;; value-reg: valeur à stocker
+      ;; Effet: array[index] = value
+      (:ASET
+       (let* ((array-id-reg (first args))
+              (index-reg (second args))
+              (value-reg (third args))
+              (array-id (get-value vm array-id-reg))
+              (index (get-value vm index-reg))
+              (value (get-value vm value-reg))
+              ;; Récupérer le tableau Lisp
+              (array (vm-get-array vm array-id)))
+         ;; Vérifier les bornes
+         (when (or (< index 0) (>= index (length array)))
+           (error "ASET: Index hors limites: ~A (taille: ~A)" index (length array)))
+         ;; Écrire la valeur
+         (setf (aref array index) value)
+         (when (vm-verbose vm)
+           (format t "  ASET: array[~A] := ~A~%" index value))))
+      
       (t (error "Opcode non implémenté: ~A" opcode))))
+
   
   ;; Incrémenter le pointeur d'instruction ($pc)
   (let ((pc-reg (get-reg :pc)))

@@ -1,0 +1,518 @@
+════════════════════════════════════════════════════════════════════════════════
+                    PLAN D'IMPLÉMENTATION - SYSTÈME DE SYMBOLES
+                         Pour le Bootstrap du Compilateur
+                              6 janvier 2026
+════════════════════════════════════════════════════════════════════════════════
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                              PROBLÈME ACTUEL                                ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+Le test test-true-bootstrap.lisp ÉCHOUE car:
+  ✓ Le compilateur (compile-constant-simplified) s'exécute dans la VM
+  ✗ Il retourne (0) au lieu de ((LI 42 $V0))
+  
+Raison: Les symboles keywords (:LI, :$V0) sont compilés comme 0
+        Il n'y a pas de système d'interning de symboles dans la VM
+
+Code actuel qui échoue:
+  (defun compile-constant-simplified (value env)
+    (list (list :LI value *reg-v0*)))  ; :LI et *reg-v0* (:$V0) → 0
+
+Résultat attendu: ((LI 42 $V0))
+Résultat obtenu:  (0)
+
+
+════════════════════════════════════════════════════════════════════════════════
+                              PHASE 1: INTERNING DE SYMBOLES
+════════════════════════════════════════════════════════════════════════════════
+
+Objectif: Créer un système de conversion Symbole ↔ ID numérique
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 1.1: Tables d'interning dans vm.lisp                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Ajouter après *vm-lisp-objects*:
+
+  (defvar *vm-symbol-to-id* (make-hash-table :test 'equal)
+    "Table: nom de symbole (string) → ID numérique")
+  
+  (defvar *vm-id-to-symbol* (make-hash-table :test 'eql)
+    "Table: ID numérique → nom de symbole (string)")
+  
+  (defvar *vm-next-symbol-id* 1
+    "Prochain ID disponible pour un symbole")
+
+Fichier: src/vm.lisp
+Lignes: Après ligne ~50 (près de *vm-lisp-objects*)
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 1.2: Fonction d'interning                                           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Ajouter dans vm.lisp:
+
+  (defun intern-symbol (symbol-name)
+    "Retourne l'ID d'un symbole, le crée si nécessaire"
+    (let ((existing-id (gethash symbol-name *vm-symbol-to-id*)))
+      (if existing-id
+          existing-id
+          ;; Créer nouveau symbole
+          (let ((new-id *vm-next-symbol-id*))
+            (setf (gethash symbol-name *vm-symbol-to-id*) new-id)
+            (setf (gethash new-id *vm-id-to-symbol*) symbol-name)
+            (incf *vm-next-symbol-id*)
+            new-id))))
+  
+  (defun symbol-name-from-id (symbol-id)
+    "Retourne le nom d'un symbole depuis son ID"
+    (gethash symbol-id *vm-id-to-symbol*))
+
+Fichier: src/vm.lisp
+Position: Dans la section des utilitaires
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 1.3: Pré-interning des symboles du compilateur                      │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Au démarrage de la VM, pré-enregistrer les symboles essentiels:
+
+  (defun initialize-compiler-symbols ()
+    "Pré-intern les symboles utilisés par le compilateur"
+    ;; Instructions MIPS
+    (intern-symbol "LI")
+    (intern-symbol "LW")
+    (intern-symbol "SW")
+    (intern-symbol "ADD")
+    (intern-symbol "SUB")
+    (intern-symbol "MUL")
+    (intern-symbol "DIV")
+    (intern-symbol "BEQ")
+    (intern-symbol "BNE")
+    (intern-symbol "J")
+    (intern-symbol "JAL")
+    (intern-symbol "JR")
+    (intern-symbol "MOVE")
+    (intern-symbol "PUSH")
+    (intern-symbol "POP")
+    ;; Registres
+    (intern-symbol "$V0")
+    (intern-symbol "$V1")
+    (intern-symbol "$A0")
+    (intern-symbol "$A1")
+    (intern-symbol "$A2")
+    (intern-symbol "$A3")
+    (intern-symbol "$T0")
+    (intern-symbol "$T1")
+    (intern-symbol "$SP")
+    (intern-symbol "$FP")
+    (intern-symbol "$RA")
+    ;; Keywords Lisp
+    (intern-symbol "DEFUN")
+    (intern-symbol "IF")
+    (intern-symbol "LET")
+    (intern-symbol "QUOTE")
+    (intern-symbol "LAMBDA")
+    (intern-symbol "NIL")
+    (intern-symbol "T"))
+
+Appeler dans make-new-vm après initialisation
+
+Fichier: src/vm.lisp
+
+
+════════════════════════════════════════════════════════════════════════════════
+                      PHASE 2: INSTRUCTIONS VM POUR SYMBOLES
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 2.1: Instruction INTERN                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Nouvelle instruction: INTERN <string-handle> → ID dans $V0
+
+  ((INTERN :INTERN)
+   (let* ((string-handle (first args))
+          (string-obj (gethash string-handle *vm-lisp-objects*)))
+     (unless (stringp string-obj)
+       (error "INTERN attend un handle de string, reçu: ~A" string-obj))
+     (let ((symbol-id (intern-symbol string-obj)))
+       (set-value vm :$v0 symbol-id))))
+
+Fichier: src/vm.lisp
+Position: Dans la fonction execute-instruction, section des instructions
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 2.2: Instruction SYMBOL-NAME                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Nouvelle instruction: SYMBOL-NAME <symbol-id> → handle string dans $V0
+
+  ((SYMBOL-NAME :SYMBOL-NAME)
+   (let* ((symbol-id (first args))
+          (symbol-name (symbol-name-from-id symbol-id)))
+     (if symbol-name
+         (let ((handle (incf *vm-lisp-handle-counter*)))
+           (setf (gethash handle *vm-lisp-objects*) symbol-name)
+           (set-value vm :$v0 handle))
+         (set-value vm :$v0 0))))
+
+Fichier: src/vm.lisp
+Position: Après INTERN
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 2.3: Instruction MAKE-SYMBOL (optionnel)                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Pour créer un symbole directement depuis un ID:
+
+  ((MAKE-SYMBOL :MAKE-SYMBOL)
+   (let ((symbol-id (first args)))
+     (set-value vm :$v0 symbol-id)))
+
+Fichier: src/vm.lisp
+Position: Après SYMBOL-NAME
+
+
+════════════════════════════════════════════════════════════════════════════════
+                    PHASE 3: MODIFICATION DU COMPILATEUR
+════════════════════════════════════════════════════════════════════════════════
+
+Objectif: Compiler les symboles keywords comme des IDs symboliques
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 3.1: Fonction de compilation des symboles                           │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Dans compiler-simplified.lisp, ajouter:
+
+  (defun compile-symbol (sym)
+    "Compile un symbole en utilisant INTERN"
+    (let ((sym-name (symbol-name sym)))
+      `((:LI ,(length sym-name) :$T0)           ; Longueur du nom
+        (:STRING ,sym-name)                      ; Créer string (nouvelle instruction)
+        (:INTERN :$V0)                           ; Intern → ID dans $V0
+        )))
+
+Alternative plus simple: Utiliser des IDs pré-calculés
+
+  (defvar *symbol-ids* (make-hash-table :test 'eq))
+  
+  (defun get-symbol-id (sym)
+    "Retourne l'ID pré-calculé d'un symbole"
+    (or (gethash sym *symbol-ids*)
+        (error "Symbole non enregistré: ~A" sym)))
+  
+  (defun register-compiler-symbols ()
+    "Enregistre les symboles du compilateur avec leurs IDs"
+    (setf (gethash :LI *symbol-ids*) 1)
+    (setf (gethash :LW *symbol-ids*) 2)
+    (setf (gethash :SW *symbol-ids*) 3)
+    ;; ... pour tous les symboles
+    (setf (gethash :$V0 *symbol-ids*) 100)
+    (setf (gethash :$V1 *symbol-ids*) 101)
+    ;; ...
+    )
+
+Fichier: src/compiler-simplified.lisp
+Position: Au début du fichier
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 3.2: Modification de compile-constant-simplified                    │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Changer:
+  (defun compile-constant-simplified (value env)
+    (list (list :LI value *reg-v0*)))
+
+En:
+  (defun compile-constant-simplified (value env)
+    (list (list (get-symbol-id :LI) 
+                value 
+                (get-symbol-id *reg-v0*))))
+
+OU si on garde les keywords:
+  (defun compile-constant-simplified (value env)
+    (list (list :LI value *reg-v0*)))
+    ;; La VM devra convertir les keywords en lisant le code
+
+Fichier: src/compiler-simplified.lisp
+Ligne: 356
+
+
+════════════════════════════════════════════════════════════════════════════════
+                    PHASE 4: INSTRUCTION STRING (si nécessaire)
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 4.1: Créer des strings dans la VM                                   │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Si on veut que le compilateur crée des symboles dynamiquement:
+
+  ((STRING :STRING)
+   (let* ((str (first args))  ; String littérale
+          (handle (incf *vm-lisp-handle-counter*)))
+     (setf (gethash handle *vm-lisp-objects*) str)
+     (set-value vm :$v0 handle)))
+
+Fichier: src/vm.lisp
+Position: Avec les autres instructions
+
+
+════════════════════════════════════════════════════════════════════════════════
+                       PHASE 5: MODIFICATION DU LOADER
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 5.1: Conversion des symboles au chargement                          │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Option 1: Convertir dans load-code
+
+Quand on charge une instruction comme (:LI 42 :$V0), convertir:
+  - :LI → ID de "LI"
+  - :$V0 → ID de "$V0"
+
+  (defun convert-instruction-symbols (instr)
+    "Convertit les symboles keywords en IDs"
+    (cond
+      ((symbolp instr) (intern-symbol (symbol-name instr)))
+      ((listp instr) (mapcar #'convert-instruction-symbols instr))
+      (t instr)))
+
+Modifier load-code pour appeler convert-instruction-symbols
+
+Fichier: src/loader.lisp
+Position: Fonction load-code
+
+
+Option 2: Garder format actuel, convertir à l'exécution
+
+Ne rien changer au loader, mais la VM sait que certaines positions
+contiennent des symboles (ex: premier élément d'une instruction)
+
+Fichier: src/vm.lisp
+Position: Fonction execute-instruction
+
+
+════════════════════════════════════════════════════════════════════════════════
+                        PHASE 6: RECONSTRUCTION DES SYMBOLES
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 6.1: Convertir IDs → Symboles lors de la récupération               │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Quand le compilateur dans la VM retourne une liste d'instructions,
+convertir les IDs en symboles keywords:
+
+  (defun reconstruct-symbols (code)
+    "Convertit les IDs numériques en symboles keywords"
+    (cond
+      ((null code) nil)
+      ((numberp code)
+       (let ((sym-name (symbol-name-from-id code)))
+         (if sym-name
+             (intern sym-name :keyword)  ; Recréer le keyword
+             code)))
+      ((listp code)
+       (mapcar #'reconstruct-symbols code))
+      (t code)))
+
+Utiliser dans test-true-bootstrap.lisp:
+
+  (let* ((result-handle (get-register exec-vm (get-reg :v0)))
+         (generated-code-raw (gethash result-handle *vm-lisp-objects*))
+         (generated-code (reconstruct-symbols generated-code-raw)))
+    ...)
+
+Fichier: test-true-bootstrap.lisp
+Position: Après récupération du résultat
+
+
+════════════════════════════════════════════════════════════════════════════════
+                            PHASE 7: TESTS UNITAIRES
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 7.1: Test d'interning basique                                       │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Créer: test-symbol-interning.lisp
+
+  (defvar id1 (intern-symbol "TEST"))
+  (defvar id2 (intern-symbol "TEST"))
+  (defvar id3 (intern-symbol "OTHER"))
+  
+  (assert (= id1 id2))  ; Même symbole → même ID
+  (assert (/= id1 id3)) ; Symboles différents → IDs différents
+  (assert (string= (symbol-name-from-id id1) "TEST"))
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 7.2: Test instruction INTERN                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Créer: test-vm-intern.lisp
+
+  ;; Créer un handle pour "LI"
+  (let* ((str "LI")
+         (handle (incf *vm-lisp-handle-counter*)))
+    (setf (gethash handle *vm-lisp-objects*) str)
+    
+    ;; Code: INTERN handle
+    (let ((vm (make-new-vm)))
+      (mem-write vm 0 (list :INTERN handle))
+      (set-register vm (get-reg :pc) 0)
+      (execute-instruction vm)
+      
+      (let ((result-id (get-register vm (get-reg :v0))))
+        (format t "ID de 'LI': ~A~%" result-id)
+        (assert (> result-id 0)))))
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 7.3: Test compile-constant avec symboles                            │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Modifier test-true-bootstrap.lisp:
+
+  ;; Après récupération du code généré par la VM:
+  (let ((generated-code (reconstruct-symbols generated-code-raw)))
+    (format t "Code reconstruit: ~A~%" generated-code)
+    ;; Devrait afficher: ((LI 42 $V0))
+    )
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          PHASE 8: VALIDATION COMPLÈTE
+════════════════════════════════════════════════════════════════════════════════
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 8.1: Retour au test test-true-bootstrap.lisp                        │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Ré-exécuter test-true-bootstrap.lisp avec le système de symboles:
+
+  $ clisp test-true-bootstrap.lisp
+
+Résultat attendu:
+  ✅ 42: IDENTIQUE (1 instructions)
+     Natif: ((LI 42 $V0))
+     VM:    ((LI 42 $V0))
+  
+  ✅ 123: IDENTIQUE (1 instructions)
+     Natif: ((LI 123 $V0))
+     VM:    ((LI 123 $V0))
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 8.2: Étendre aux fonctions complexes                                │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Une fois compile-constant-simplified fonctionnel:
+
+1. Ajouter compile-variable-simplified
+2. Ajouter compile-if-simplified  
+3. Charger plus de fonctions du compilateur
+4. Tester avec fibo et ack (comme prévu initialement)
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│ ÉTAPE 8.3: Bootstrap complet                                              │
+└────────────────────────────────────────────────────────────────────────────┘
+
+Objectif final du test-true-bootstrap.lisp:
+
+  Phase 1: Compiler le compilateur complet (132 fonctions)
+  Phase 2: Charger dans la VM
+  Phase 3: Utiliser le compilateur dans la VM pour compiler fibo et ack
+  Phase 4: Comparer avec les versions natives
+  Phase 5: ✅ IDENTIQUE → Bootstrap réussi!
+
+
+════════════════════════════════════════════════════════════════════════════════
+                              ORDRE D'IMPLÉMENTATION
+════════════════════════════════════════════════════════════════════════════════
+
+Priorité 1 (CRITIQUE - pour test actuel):
+  ☐ 1.1: Tables d'interning (*vm-symbol-to-id*, etc.)
+  ☐ 1.2: Fonction intern-symbol
+  ☐ 1.3: initialize-compiler-symbols
+  ☐ 2.1: Instruction INTERN
+  ☐ 6.1: Fonction reconstruct-symbols
+  ☐ 8.1: Modifier test-true-bootstrap.lisp pour utiliser reconstruct-symbols
+
+Priorité 2 (pour robustesse):
+  ☐ 2.2: Instruction SYMBOL-NAME
+  ☐ 4.1: Instruction STRING
+  ☐ 7.1: Tests unitaires interning
+  ☐ 7.2: Tests instruction INTERN
+
+Priorité 3 (optimisation):
+  ☐ 3.1: get-symbol-id avec IDs pré-calculés
+  ☐ 5.1: Conversion des symboles dans le loader
+  ☐ 3.2: Modifier toutes les fonctions de compilation
+
+Priorité 4 (validation finale):
+  ☐ 8.2: Étendre aux fonctions complexes
+  ☐ 8.3: Bootstrap complet avec fibo et ack
+
+
+════════════════════════════════════════════════════════════════════════════════
+                                ESTIMATION
+════════════════════════════════════════════════════════════════════════════════
+
+Temps estimé par phase:
+  Phase 1 (Interning):           30-45 minutes
+  Phase 2 (Instructions VM):     20-30 minutes
+  Phase 3 (Compilateur):         40-60 minutes
+  Phase 4 (STRING):              15-20 minutes
+  Phase 5 (Loader):              20-30 minutes
+  Phase 6 (Reconstruction):      15-20 minutes
+  Phase 7 (Tests):               30-45 minutes
+  Phase 8 (Validation):          20-30 minutes
+
+TOTAL: 3-4 heures de développement
+
+
+════════════════════════════════════════════════════════════════════════════════
+                            RETOUR AU TEST ACTUEL
+════════════════════════════════════════════════════════════════════════════════
+
+Une fois le système de symboles implémenté (Priorité 1):
+
+1. Retourner à test-true-bootstrap.lisp
+2. Modifier la récupération du résultat pour utiliser reconstruct-symbols
+3. Ré-exécuter: clisp test-true-bootstrap.lisp
+4. Vérifier que le résultat est maintenant:
+   ✅ 42: IDENTIQUE - Natif: ((LI 42 $V0)), VM: ((LI 42 $V0))
+5. Si succès → continuer avec fonctions plus complexes
+6. Si échec → debugger avec verbose et analyse des registres
+
+
+════════════════════════════════════════════════════════════════════════════════
+                                  NOTES
+════════════════════════════════════════════════════════════════════════════════
+
+Alternative plus simple:
+  Au lieu de reconstruire les symboles, on pourrait modifier le compilateur
+  pour qu'il retourne directement des IDs numériques, et avoir une fonction
+  de "pretty-print" qui affiche les noms symboliques.
+
+Avantage: Pas besoin de reconstruct-symbols
+Inconvénient: Le code généré par la VM n'est pas directement comparable
+
+Recommandation: Implémenter reconstruct-symbols pour commencer (plus simple)
+
+
+════════════════════════════════════════════════════════════════════════════════
+                                FIN DU PLAN
+════════════════════════════════════════════════════════════════════════════════

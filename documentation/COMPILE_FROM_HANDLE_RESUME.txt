@@ -1,0 +1,183 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║                  COMPILE-FROM-HANDLE - RÉSUMÉ TECHNIQUE                    ║
+║                          2 février 2026                                    ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ FONCTION IMPLÉMENTÉE ET VALIDÉE
+═══════════════════════════════════════════════════════════════════════════════
+
+NOM: compile-from-handle(handle)
+
+FICHIER: utils-bootstrap.lisp
+
+BUT: Compiler une expression Lisp stockée en mémoire via son handle
+
+PIPELINE:
+  Handle → read-expression-from-vm() → Expression (keywords)
+         → convert-keywords-to-symbols() → Expression (symboles)
+         → compile-lisp-to-mips-simplified() → Code MIPS
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ TESTS ET VALIDATION
+═══════════════════════════════════════════════════════════════════════════════
+
+TEST 1: test-compile-from-handle.lisp
+─────────────────────────────────────
+  Objectif: Vérifier que compile-from-handle génère le même code que natif
+  Résultat: ✅ RÉUSSI (1/1)
+  Détails: Code FIBO identique (79 instructions)
+
+TEST 2: test-final-compile-from-handle.lisp
+───────────────────────────────────────────
+  Objectif: Test complet FIBO + ACK avec affichage du code
+  Résultat: ✅ RÉUSSI (2/2)
+  Détails:
+    • FIBO: 79 instructions - ✅ IDENTIQUE
+    • ACK: 135 instructions - ✅ IDENTIQUE
+    • Code byte-for-byte identique au compilateur natif
+
+═══════════════════════════════════════════════════════════════════════════════
+UTILISATION (MODE NATIF)
+═══════════════════════════════════════════════════════════════════════════════
+
+;; 1. Charger les bibliothèques
+(load "src/asm-ops.lisp")
+(load "src/vm.lisp")
+(load "src/compiler-simplified.lisp")
+(load "utils-bootstrap.lisp")
+
+;; 2. Construire une expression en mémoire
+(defparameter *expr* '(defun fibo (n)
+                        (if (< n 2)
+                            n
+                            (+ (fibo (- n 1)) (fibo (- n 2))))))
+
+(defparameter *handle* (build-expression-in-vm *expr*))
+;; => Handle: 1027
+
+;; 3. Compiler depuis le handle
+(defparameter *code* (compile-from-handle *handle*))
+;; => 79 instructions MIPS
+
+;; 4. Vérifier que c'est identique au natif
+(defparameter *code-natif* (compile-lisp-to-mips-simplified *expr*))
+(equal *code* *code-natif*)
+;; => T (IDENTIQUE!)
+
+═══════════════════════════════════════════════════════════════════════════════
+⚠️ LIMITATION: EXÉCUTION DANS LA VM
+═══════════════════════════════════════════════════════════════════════════════
+
+PROBLÈME:
+compile-from-handle appelle d'autres fonctions Lisp:
+  • read-expression-from-vm(handle)
+  • convert-keywords-to-symbols(expr)
+  • compile-lisp-to-mips-simplified(expr)
+
+Ces fonctions ne sont pas disponibles comme appels directs dans la VM.
+
+POURQUOI:
+La VM exécute du code MIPS compilé. Les appels de fonction Lisp nécessitent:
+  1. Un système de résolution de symboles de fonctions
+  2. Une table d'adresses de fonctions
+  3. Ou toutes les fonctions compilées et liées
+
+SOLUTIONS POSSIBLES:
+
+Option A: Utilisation en MODE NATIF (recommandé actuellement)
+  ✅ Avantages:
+     - Fonctionne parfaitement
+     - Tests 100% réussis
+     - Code identique au natif
+     - Simple à utiliser
+  ❌ Limitations:
+     - N'est pas exécuté dans la VM
+
+Option B: Compiler TOUTES les fonctions du compilateur (132 fonctions)
+  ✅ Avantages:
+     - Vrai bootstrap complet dans la VM
+     - Meta-compilation possible
+  ❌ Limitations:
+     - Complexe (appels inter-fonctions)
+     - Nécessite système de liaison
+     - Estimation: 20-30 heures de travail
+
+Option C: Créer une table d'adresses de fonctions
+  ✅ Avantages:
+     - Résout les appels de fonctions
+     - Plus simple que Option B
+  ❌ Limitations:
+     - Nécessite modifications du compilateur
+     - Estimation: 10-15 heures de travail
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ RECOMMANDATION
+═══════════════════════════════════════════════════════════════════════════════
+
+POUR L'INSTANT:
+Utiliser compile-from-handle en MODE NATIF.
+
+C'est suffisant pour:
+  ✅ Démontrer que les 3 points du plan sont implémentés
+  ✅ Construire des expressions en mémoire
+  ✅ Les compiler avec un code identique au natif
+  ✅ Valider l'infrastructure du bootstrap
+
+POUR PLUS TARD (si nécessaire):
+Implémenter Option C (table d'adresses) pour permettre l'exécution dans la VM.
+
+═══════════════════════════════════════════════════════════════════════════════
+📊 STATISTIQUES FINALES
+═══════════════════════════════════════════════════════════════════════════════
+
+Fonctions créées:
+  • compile-from-handle(handle)
+  • convert-keywords-to-symbols(expr)
+  
+Tests créés: 3 fichiers
+  • test-compile-from-handle.lisp
+  • test-final-compile-from-handle.lisp
+  • test-fibo-natif.lisp
+
+Tests réussis: 3/3 (100%)
+  • compile-from-handle vs natif: ✅
+  • FIBO: ✅ (79 instructions identiques)
+  • ACK: ✅ (135 instructions identiques)
+
+Code ajouté: ~100 lignes (compile-from-handle + helpers + tests)
+
+═══════════════════════════════════════════════════════════════════════════════
+📝 EXEMPLE COMPLET
+═══════════════════════════════════════════════════════════════════════════════
+
+Voir: test-final-compile-from-handle.lisp
+
+Ce fichier démontre:
+  1. Compilation native de FIBO et ACK
+  2. Construction des expressions en mémoire (handles)
+  3. Compilation via compile-from-handle
+  4. Comparaison byte-à-byte
+  5. Affichage du code généré
+  6. Résultat: ✅ 2/2 tests réussis (IDENTIQUE)
+
+═══════════════════════════════════════════════════════════════════════════════
+✅ CONCLUSION
+═══════════════════════════════════════════════════════════════════════════════
+
+compile-from-handle est FONCTIONNEL et VALIDÉ:
+  ✅ Génère un code identique au compilateur natif
+  ✅ Fonctionne avec des expressions complexes (FIBO, ACK)
+  ✅ Tests: 100% de réussite (3/3)
+  ✅ Infrastructure complète pour le bootstrap
+
+La fonction accomplit son objectif: compiler une expression Lisp depuis son
+handle en mémoire, avec un résultat identique au compilateur natif.
+
+L'exécution dans la VM nécessiterait des développements supplémentaires pour
+résoudre les appels de fonctions, mais la fonction elle-même est correcte
+et validée.
+
+╔════════════════════════════════════════════════════════════════════════════╗
+║                            FIN DU RÉSUMÉ                                   ║
+╚════════════════════════════════════════════════════════════════════════════╝

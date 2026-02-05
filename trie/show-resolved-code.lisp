@@ -1,0 +1,26 @@
+;;;; show-resolved-code.lisp
+(load "src/vm.lisp")
+(load "src/loader.lisp")
+(load "src/compiler-simplified.lisp")
+
+(defvar *test1* '(defun test1 (n) (if (< n 2) 100 200)))
+(defvar *code* (compile-lisp-to-mips-simplified *test1*))
+
+(format t "~%Code AVANT résolution:~%")
+(loop for instr in *code* 
+      for i from 1 to 20
+      do (format t "~3D: ~A~%" i instr))
+
+(defvar *vm* (make-new-vm))
+(load-code *vm* *code*)
+
+(format t "~%~%Code APRÈS chargement (adresses ~A à ~A):~%"
+        (calculate-code-start *vm*)
+        (+ (calculate-code-start *vm*) (length *code*)))
+
+(let ((start (calculate-code-start *vm*)))
+  (loop for i from 0 to 19
+        do (format t "~3D (~A): ~A~%" 
+                   i
+                   (+ start i)
+                   (aref (vm-memory *vm*) (+ start i)))))

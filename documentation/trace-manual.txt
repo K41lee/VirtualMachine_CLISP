@@ -1,0 +1,58 @@
+Traçage manuel de sum-to-n(3)
+
+=== Appel initial: sum-to-n(3) ===
+Ligne 55: ADDI $SP -16 $SP     ; $SP -= 16 (sauvegarde registres)
+Ligne 60: LI 3 $V0              ; $V0 = 3
+Ligne 61: MOVE $V0 $A0          ; $A0 = 3
+Ligne 62: JAL SUM-TO-N          ; Appel avec n=3
+
+=== Dans sum-to-n(3) ===
+Ligne 2: ADDI $SP -12 $SP       ; $SP -= 12 (frame)
+Ligne 3: SW $RA $SP 0           ; Sauvegarde $RA
+Ligne 4: SW $FP $SP 4           ; Sauvegarde $FP
+Ligne 5: MOVE $SP $FP           ; $FP = $SP (nouveau frame)
+Ligne 6: SW $A0 $FP 8           ; Sauvegarde n=3 à $FP+8
+
+Ligne 7: LW $V0 $FP 8           ; $V0 = n = 3
+Ligne 8: ADDI $SP -4 $SP        ; $SP -= 4 (pour sauver)
+Ligne 9: SW $V0 $SP 0           ; Sauvegarde 3 à $SP+0
+Ligne 10: LI 0 $V0              ; $V0 = 0
+Ligne 11: LW $T0 $SP 0          ; $T0 = 3
+Ligne 12: ADDI $SP 4 $SP        ; $SP += 4 (libère)
+Ligne 13: BEQ $T0 $V0 CMP_TRUE_3 ; 3 == 0? NON
+Ligne 14: LI 0 $V0              ; $V0 = 0 (faux)
+Ligne 19: BEQ $V0 $ZERO ELSE_1  ; 0 == 0? OUI, aller à ELSE_1
+
+Ligne 23: LW $V0 $FP 8          ; $V0 = n = 3
+Ligne 24: SW $V0 $SP 0          ; Sauvegarde 3 à $SP+0
+Ligne 25: ADDI $SP -4 $SP       ; $SP -= 4
+Ligne 26: ADDI $SP -16 $SP      ; $SP -= 16 (sauvegarde registres)
+
+Ligne 31: LW $V0 $FP 8          ; $V0 = n = 3
+Ligne 32: SW $V0 $SP 0          ; Sauvegarde 3 à $SP+0
+Ligne 33: ADDI $SP -4 $SP       ; $SP -= 4
+Ligne 34: LI 1 $V0              ; $V0 = 1
+Ligne 35: LW $T0 $SP 4          ; $T0 = 3 (depuis $SP+4, car on a fait -4)
+Ligne 36: ADDI $SP 4 $SP        ; $SP += 4 (libère)
+Ligne 37: SUB $T0 $V0 $V0       ; $V0 = 3 - 1 = 2
+Ligne 38: MOVE $V0 $A0          ; $A0 = 2
+Ligne 39: JAL SUM-TO-N          ; Appel récursif avec n=2
+
+=== Dans sum-to-n(2) ===
+[... même logique, retourne 2 + sum-to-n(1) ...]
+
+=== Retour dans sum-to-n(3) après sum-to-n(2) ===
+Ligne 40-43: Restaure $S0-$S6
+Ligne 44: ADDI $SP 16 $SP       ; $SP += 16 (restaure après sauvegarde registres)
+Ligne 45: LW $T0 $SP 4          ; $T0 = ??? (devrait être 3)
+Ligne 46: ADDI $SP 4 $SP        ; $SP += 4
+Ligne 47: ADD $V0 $T0 $V0       ; $V0 = résultat + $T0
+
+PROBLÈME: À la ligne 45, on charge depuis $SP+4
+- Ligne 24: SW à $SP+0
+- Ligne 25: ADDI $SP -4 -> maintenant à $SP+4
+- Ligne 26: ADDI $SP -16 -> maintenant à $SP+20
+- Ligne 44: ADDI $SP 16 -> maintenant à $SP+4
+- Ligne 45: LW depuis $SP+4 -> CORRECT!
+
+Mais attendez... il y a un problème subtil. Entre ligne 25 et 26, le $SP change!

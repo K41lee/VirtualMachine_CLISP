@@ -49,9 +49,13 @@
     ;; Instructions type-checking (PHASE LOADER)
     :TYPE-CHECK
     ;; Instructions listes (PHASE LOADER)
-    :LIST-CAR :LIST-CDR :LIST-CONS :LIST-CADR
+    :LIST :LIST-CAR :LIST-CDR :LIST-CONS :LIST-CADR
     ;; Instructions de comparaison (PHASE LOADER)
     :EQUAL
+    ;; Instructions tableaux (ARRAYS)
+    :MAKE-ARRAY :AREF :ASET
+    ;; Instructions symboles et variables globales
+    :INTERN :SYMBOL-NAME :GLOBAL-GET :GLOBAL-SET
     ;; Autres
     :NOP :HALT :LABEL :PRINT :SYSCALL)
   "Liste des opcodes supportés par la VM")
@@ -174,33 +178,64 @@
 ;;; ============================================================================
 
 (defun opcode-p (op)
-  "Vérifie si OP est un opcode valide"
-  (member op *opcodes*))
+  "Vérifie si OP est un opcode valide (keyword, symbole ou ID numérique)"
+  (cond
+    ;; Si c'est un keyword, vérifier directement
+    ((keywordp op)
+     (member op *opcodes*))
+    ;; Si c'est un ID numérique, vérifier si c'est un symbole d'instruction
+    ((and (numberp op) (fboundp 'symbol-name-from-id))
+     (let ((name (symbol-name-from-id op)))
+       (and name
+            ;; Convertir le nom en keyword et vérifier
+            (member (intern name :keyword) *opcodes*))))
+    ;; Si c'est un symbole, le convertir en keyword
+    ((symbolp op)
+     (member (intern (symbol-name op) :keyword) *opcodes*))
+    ;; Sinon invalide
+    (t nil)))
 
 (defun register-p (reg)
-  "Vérifie si REG est un registre valide"
-  (member reg *register-names*))
+  "Vérifie si REG est un registre valide (keyword ou ID de symbole)"
+  (or (member reg *register-names*)
+      ;; Vérifier si c'est un ID de symbole de registre (commence par $)
+      (and (numberp reg)
+           (fboundp 'symbol-name-from-id)
+           (let ((name (symbol-name-from-id reg)))
+             (and name (char= (char name 0) #\$))))))
 
 (defun instruction-arity (opcode)
   "Retourne le nombre d'arguments attendus pour un opcode"
-  (case opcode
+  ;; Convertir ID en keyword si nécessaire
+  (let ((kw (if (and (numberp opcode) (fboundp 'symbol-id-to-keyword))
+                (symbol-id-to-keyword opcode)
+                opcode)))
+    (case kw
     ;; 0 arguments
     ((:NOP :HALT :RET) 0)
     ;; 1 argument
     ((:J :JMP :JAL :JR :JALR :JEQ :JNE :JGT :JLT :JGE :JLE :JZ :JNZ :CALL :LABEL :PUSH :POP :PRINT :NOT
       :MFLO :MFHI
       ;; Nouveaux opcodes (PHASE LOADER)
-      :HASH-MAKE :HASH-COUNT :LIST-CAR :LIST-CDR :LIST-CADR) 1)
+      :HASH-MAKE :HASH-COUNT :LIST :LIST-CAR :LIST-CDR :LIST-CADR
+      ;; Opcodes pour tableaux
+      :MAKE-ARRAY
+      ;; Opcodes pour symboles
+      :INTERN :SYMBOL-NAME :GLOBAL-GET) 1)
     ;; 2 arguments
     ((:MUL :DIV :MOVE :LOAD :STORE :LOADI :LI :CMP :MALLOC
       ;; Nouveaux opcodes (PHASE LOADER)
-      :HASH-GET :HASH-HAS-KEY :TYPE-CHECK :LIST-CONS :EQUAL) 2)
+      :HASH-GET :HASH-HAS-KEY :TYPE-CHECK :LIST-CONS :EQUAL
+      ;; Opcodes pour variables globales
+      :GLOBAL-SET) 2)
     ;; 3 arguments
-    ((:ADD :ADDI :SUB :AND :OR :LW :SW :BEQ :BNE :BLT :BGT :SLT
+    ((:ADD :ADDI :SUB :AND :OR :LW :SW :BEQ :BNE :BLT :BGT :BLE :BGE :SLT
       :EQ :NE :GT :LT :GE :LE :LOAD-HEAP :STORE-HEAP
       ;; Nouveaux opcodes (PHASE LOADER)
-      :HASH-SET) 3)
-    (t (error "Opcode inconnu: ~A" opcode))))
+      :HASH-SET
+      ;; Opcodes pour tableaux
+      :AREF :ASET) 3)
+    (t (error "Opcode inconnu: ~A" kw)))))
 
 (defun format-instruction (instr)
   "Formate une instruction pour l'affichage"
