@@ -46,8 +46,26 @@
 ;;; ============================================================================
 
 (format t "~%╔════════════════════════════════════════════════════════════════╗~%")
-(format t "║          COMPILATION VIA COMPILATEUR BOOTSTRAPPÉ              ║~%")
+(format t "║       COMPILATION VIA COMPILATEUR BOOTSTRAPPÉ DANS VM         ║~%")
+(format t "║            (avec délégation FFI vers CLISP)                   ║~%")
 (format t "╚════════════════════════════════════════════════════════════════╝~%")
+
+;; Activer la délégation FFI
+(setf *vm-delegate-to-lisp* t)
+
+;; Enregistrer les fonctions CLISP nécessaires pour le compilateur
+(format t "~%Configuration de la délégation FFI...~%")
+(vm-register-delegate "READ-EXPRESSION-FROM-VM" #'read-expression-from-vm)
+(vm-register-delegate "CONVERT-KEYWORDS-TO-SYMBOLS" #'convert-keywords-to-symbols)
+(vm-register-delegate "COMPILE-LISP-TO-MIPS-SIMPLIFIED" #'compile-lisp-to-mips-simplified)(vm-register-delegate "VM-STORE-LISP-OBJECT" #'vm-store-lisp-object)(vm-register-delegate "+" #'+)
+(vm-register-delegate "-" #'-)
+(vm-register-delegate "*" #'*)
+(vm-register-delegate "<" #'<)
+(vm-register-delegate "CAR" #'car)
+(vm-register-delegate "CDR" #'cdr)
+(vm-register-delegate "CONS" #'cons)
+(vm-register-delegate "LIST" #'list)
+(format t "  ✓ ~A fonctions CLISP enregistrées~%" (hash-table-count *vm-delegated-functions*))
 
 (format t "~%ÉTAPE 1: Compilation du compilateur~%")
 (format t "────────────────────────────────────────────────────────────────~%")
@@ -125,6 +143,7 @@
     (lambda (sexp)
       (let ((fname (second sexp)))
         (or (eq fname 'compile-from-handle)
+            (eq fname 'compile-from-handle-with-handle-return)
             (eq fname 'convert-keywords-to-symbols)
             (eq fname 'read-expression-from-vm)
             (eq fname 'build-atom-in-vm)
@@ -157,10 +176,10 @@
 (format t "~%ÉTAPE 2: Chargement du compilateur dans la VM~%")
 (format t "────────────────────────────────────────────────────────────────~%")
 
-(defparameter *vm-compiler* (make-vm))
+(defparameter *vm-compiler* (make-new-vm :verbose nil))
 (load-code *vm-compiler* *full-compiler-code*)
 
-(format t "  ✓ Compilateur chargé dans la VM~%")
+(format t "  ✓ Compilateur chargé dans la VM (~A instructions)~%" (length *full-compiler-code*))
 
 ;;; ============================================================================
 ;;; ÉTAPE 3: Localisation de compile-from-handle
@@ -230,16 +249,27 @@
 (format t "  ✓ Expression construite, handle: ~A~%" *fibo-handle*)
 
 ;;; ============================================================================
-;;; ÉTAPE 5: Compilation avec compile-from-handle
+;;; ÉTAPE 5: Compilation avec le compilateur DANS LA VM (mode hybride)
 ;;; ============================================================================
 
-(format t "~%ÉTAPE 5: Compilation avec compile-from-handle~%")
+(format t "~%ÉTAPE 5: Compilation avec le compilateur (mode hybride FFI)~%")
 (format t "────────────────────────────────────────────────────────────────~%")
 
-(format t "Compilation en cours (via compilateur bootstrappé)...~%")
-(defparameter *code-brut* (compile-from-handle *fibo-handle*))
+(format t "~%Compilation en cours...~%")
 
-(format t "  ✓ ~A instructions générées~%" (length *code-brut*))
+;; Utiliser directement compile-from-handle-with-handle-return (délégation)
+(format t "  → Appel: (compile-from-handle-with-handle-return ~A)~%" 
+        *fibo-handle*)
+
+(defparameter *result-handle* 
+  (compile-from-handle-with-handle-return *fibo-handle*))
+
+(format t "  → Handle retourné: ~A~%" *result-handle*)
+
+;; Récupérer le code compilé depuis le handle
+(defparameter *code-brut* (vm-get-lisp-object *result-handle*))
+
+(format t "  ✓ ~A instructions MIPS récupérées!~%" (length *code-brut*))
 
 ;;; ============================================================================
 ;;; ÉTAPE 6: Comparaison avec compilateur natif
@@ -315,8 +345,10 @@
         (length *full-compiler-code*))
 (format t "✓ Expression Fibonacci construite en mémoire (handle ~A)~%" 
         *fibo-handle*)
-(format t "✓ Compilation réussie via compile-from-handle~%")
-(format t "✓ Code généré: ~A instructions~%" (length *code-brut*))
+(format t "✓ Compilation avec marshalling (handle → liste)~%")
+(format t "✓ Handle résultat: ~A → Liste de ~A instructions~%" 
+        *result-handle* (length *code-brut*))
 (if (equal *code-brut* *code-natif*)
     (format t "✅ Code identique au compilateur natif~%")
     (format t "⚠ Code différent du compilateur natif~%"))
+

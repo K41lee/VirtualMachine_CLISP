@@ -189,6 +189,19 @@
       ;; Compiler l'expression
       (compile-lisp-to-mips-simplified expr))))
 
+(defun compile-from-handle-with-handle-return (handle)
+  "Version de compile-from-handle qui retourne un HANDLE vers le résultat
+   au lieu de retourner directement la liste.
+   
+   Utilisé pour appeler depuis la VM car celle-ci ne peut retourner
+   qu'un entier (handle) dans $V0, pas une liste complète.
+   
+   Retourne: handle vers la liste d'instructions MIPS dans *vm-lisp-objects*"
+  
+  (let ((code (compile-from-handle handle)))
+    ;; Stocker le résultat dans *vm-lisp-objects* et retourner le handle
+    (vm-store-lisp-object code)))
+
 ;;; ============================================================================
 ;;; Export des symboles (si utilisé comme module)
 ;;; ============================================================================
@@ -203,3 +216,5 @@
 ;; - clear-vm-objects
 ;; - list-vm-objects
 ;; - count-vm-objects
+;; - compile-from-handle
+;; - compile-from-handle-with-handle-return

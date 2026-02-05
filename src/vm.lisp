@@ -28,6 +28,66 @@
 (defparameter *vm-array-handle-counter* 10000
   "Compteur pour générer des handles uniques pour les tableaux")
 
+;;; ============================================================================
+;;; SYSTÈME DE DÉLÉGATION FFI (Foreign Function Interface)
+;;; ============================================================================
+
+(defparameter *vm-delegate-to-lisp* t
+  "Si T, la VM délègue à CLISP les fonctions inconnues")
+
+(defparameter *vm-delegated-functions* (make-hash-table)
+  "Cache des fonctions déléguées: symbole → fonction CLISP")
+
+(defparameter *vm-delegation-stats* (make-hash-table :test 'equal)
+  "Statistiques des délégations: nom-fonction → nombre d'appels")
+
+(defun vm-register-delegate (symbol-name function)
+  "Enregistre une fonction CLISP pour délégation"
+  (setf (gethash (intern (string-upcase symbol-name)) *vm-delegated-functions*)
+        function))
+
+(defun vm-can-delegate (function-name)
+  "Vérifie si une fonction peut être déléguée à CLISP"
+  (and *vm-delegate-to-lisp*
+       (or (gethash function-name *vm-delegated-functions*)
+           (fboundp function-name))))
+
+(defun vm-delegate-call (vm function-name args)
+  "Délègue un appel de fonction à CLISP et retourne le résultat"
+  (when (vm-verbose vm)
+    (format t "  ⚡ DÉLÉGATION à CLISP: ~A(~{~A~^, ~})~%" 
+            function-name args))
+  
+  ;; Statistiques
+  (let ((count (gethash function-name *vm-delegation-stats* 0)))
+    (setf (gethash function-name *vm-delegation-stats*) (1+ count)))
+  
+  ;; Appel CLISP
+  (let* ((func (or (gethash function-name *vm-delegated-functions*)
+                   (symbol-function function-name)))
+         (result (apply func args)))
+    
+    (when (vm-verbose vm)
+      (format t "  ⚡ RÉSULTAT CLISP: ~A~%" result))
+    
+    result))
+
+(defun vm-reset-delegation-stats ()
+  "Réinitialise les statistiques de délégation"
+  (clrhash *vm-delegation-stats*))
+
+(defun vm-show-delegation-stats ()
+  "Affiche les statistiques de délégation"
+  (format t "~%Statistiques de délégation CLISP:~%")
+  (format t "──────────────────────────────────~%")
+  (let ((total 0))
+    (maphash (lambda (func count)
+               (format t "  ~A: ~A appels~%" func count)
+               (incf total count))
+             *vm-delegation-stats*)
+    (format t "──────────────────────────────────~%")
+    (format t "Total: ~A appels délégués~%" total)))
+
 (defun reset-vm-hash-tables ()
   "Réinitialise les tables de hash-tables, objets Lisp et tableaux"
   (clrhash *vm-hash-tables*)
@@ -36,7 +96,8 @@
   (setf *vm-hash-handle-counter* 1000)
   (setf *vm-lisp-handle-counter* 5000)
   (setf *vm-array-handle-counter* 10000)
-  (setf *heap-pointer* +heap-start+))
+  (setf *heap-pointer* +heap-start+)
+  (vm-reset-delegation-stats))
 
 ;;; ============================================================================
 ;;; GESTION DU TAS DYNAMIQUE (PHASE 9 - CLOSURES)
@@ -84,6 +145,18 @@
     (unless array
       (error "ARRAY: Handle invalide ~A" handle))
     array))
+
+(defun vm-get-lisp-object (handle)
+  "Récupère un objet Lisp depuis son handle
+   Utilisé pour récupérer des résultats complexes (listes) depuis la VM"
+  (gethash handle *vm-lisp-objects*))
+
+(defun vm-store-lisp-object (object)
+  "Stocke un objet Lisp et retourne son handle
+   Utilisé pour passer des structures complexes à la VM"
+  (let ((handle (incf *vm-lisp-handle-counter*)))
+    (setf (gethash handle *vm-lisp-objects*) object)
+    handle))
 
 ;;; ============================================================================
 ;;; SYSTÈME D'INTERNING DE SYMBOLES
@@ -697,21 +770,47 @@
       ;; JAL: Jump And Link (appel de fonction MIPS)
       ;; Format: (JAL label) où label peut être une adresse absolue ou relative
       ;; Effet: $ra = $pc + 1; $pc = label (si absolu) ou code-start + label (si relatif)
+      ;; NOUVEAU: Si le label est un symbole et pas une adresse, tenter délégation CLISP
       (:JAL (let* ((label (first args))
                    (code-start (calculate-code-start vm))
                    (pc-reg (get-reg :pc))
                    (ra-reg (get-reg :ra))
-                   (return-addr (1+ (get-register vm pc-reg)))
-                   ;; Si label >= code-start, c'est déjà une adresse absolue
-                   (target-addr (if (>= label code-start) label (+ code-start label))))
-              (when (vm-verbose vm)
-                (format t "  JAL: Sauvegarde $ra=~A, saut vers ~A~%" 
-                        return-addr target-addr))
-              ;; Sauvegarder l'adresse de retour dans $ra
-              (set-register vm ra-reg return-addr)
-              ;; Sauter au label
-              (set-register vm pc-reg target-addr)
-              (return-from execute-instruction)))
+                   (return-addr (1+ (get-register vm pc-reg))))
+              
+              ;; Cas 1: Label est un symbole → peut être une fonction CLISP
+              (when (and (symbolp label) (vm-can-delegate label))
+                (when (vm-verbose vm)
+                  (format t "  JAL: Détection fonction déléguée ~A~%" label))
+                
+                ;; Extraire les arguments depuis les registres $A0-$A3
+                (let* ((a0 (get-register vm (get-reg :a0)))
+                       (a1 (get-register vm (get-reg :a1)))
+                       (a2 (get-register vm (get-reg :a2)))
+                       (a3 (get-register vm (get-reg :a3)))
+                       ;; Compter les arguments valides (non-nuls ou présents)
+                       ;; TODO: améliorer la détection du nombre d'arguments
+                       (args-list (list a0 a1 a2 a3))
+                       ;; Pour l'instant, on passe tous les registres
+                       (result (vm-delegate-call vm label args-list)))
+                  
+                  ;; Placer le résultat dans $V0
+                  (set-register vm (get-reg :v0) result)
+                  
+                  ;; Simuler le retour de fonction (pas de vrai saut)
+                  ;; On continue à l'instruction suivante
+                  (set-register vm pc-reg return-addr)
+                  (return-from execute-instruction)))
+              
+              ;; Cas 2: Adresse numérique → saut normal
+              (let ((target-addr (if (>= label code-start) label (+ code-start label))))
+                (when (vm-verbose vm)
+                  (format t "  JAL: Sauvegarde $ra=~A, saut vers ~A~%" 
+                          return-addr target-addr))
+                ;; Sauvegarder l'adresse de retour dans $ra
+                (set-register vm ra-reg return-addr)
+                ;; Sauter au label
+                (set-register vm pc-reg target-addr)
+                (return-from execute-instruction))))
       
       ;; JR: Jump Register (retour de fonction MIPS)
       ;; Format: (JR $rs)
@@ -1370,4 +1469,9 @@
           ;; Heap management (Phase 9)
           reset-heap vm-malloc *heap-pointer* +heap-limit+
           ;; Function calling (direct call)
-          call-function find-function-address))
+          call-function find-function-address
+          ;; FFI Delegation
+          *vm-delegate-to-lisp* vm-register-delegate vm-can-delegate
+          vm-delegate-call vm-reset-delegation-stats vm-show-delegation-stats
+          ;; Lisp objects marshalling
+          vm-get-lisp-object vm-store-lisp-object *vm-lisp-objects*))
