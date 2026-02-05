@@ -173,6 +173,9 @@
         ;; Initialiser $pc au début du code
         (set-register vm (get-reg :pc) code-start)
         
+        ;; Stocker le code pour call-function
+        (setf (gethash vm *vm-loaded-code*) asm-code)
+        
         (when verbose
           (format t "Code chargé à partir de l'adresse ~A~%" code-start)
           (format t "$pc initialisé à ~A~%" code-start))

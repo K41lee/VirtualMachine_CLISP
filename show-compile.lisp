@@ -129,53 +129,6 @@
   (format t "  ├─ Stores (SW):      ~A~%" nb-stores)
   (format t "  └─ Autres:           ~A~%" nb-other))
 
-;;; ============================================================================
-;;; Structure du code
-;;; ============================================================================
-
-(format t "~%════════════════════════════════════════════════════════════════~%")
-(format t "STRUCTURE DU CODE:~%")
-(format t "════════════════════════════════════════════════════════════════~%")
-
-(format t "~%1. SAUT INITIAL~%")
-(format t "   └─ J FIBO_END (évite l'exécution accidentelle)~%")
-
-(format t "~%2. PROLOGUE (sauvegarde contexte)~%")
-(format t "   ├─ ADDI $SP -12 $SP  (allouer espace pile)~%")
-(format t "   ├─ SW $RA $SP 0      (sauver adresse retour)~%")
-(format t "   ├─ SW $FP $SP 4      (sauver frame pointer)~%")
-(format t "   ├─ MOVE $SP $FP      (nouveau frame)~%")
-(format t "   └─ SW $A0 $FP 8      (sauver argument n)~%")
-
-(format t "~%3. TEST (n < 2)~%")
-(format t "   ├─ LW $V0 $FP 8      (charger n)~%")
-(format t "   ├─ LI 2 $V0          (constante 2)~%")
-(format t "   ├─ BLT $T0 $V0 ...   (si n < 2)~%")
-(format t "   └─ BEQ ... ELSE      (sinon)~%")
-
-(format t "~%4. CAS DE BASE (n < 2)~%")
-(format t "   └─ LW $V0 $FP 8      (retourner n)~%")
-
-(format t "~%5. CAS RÉCURSIF (n >= 2)~%")
-(format t "   ├─ Calcul fibo(n-1)~%")
-(format t "   │  ├─ SUB ... (n-1)~%")
-(format t "   │  ├─ JAL FIBO~%")
-(format t "   │  └─ Sauvegarder résultat~%")
-(format t "   ├─ Calcul fibo(n-2)~%")
-(format t "   │  ├─ SUB ... (n-2)~%")
-(format t "   │  ├─ JAL FIBO~%")
-(format t "   │  └─ Récupérer résultat~%")
-(format t "   └─ ADD (additionner les deux résultats)~%")
-
-(format t "~%6. ÉPILOGUE (restauration contexte)~%")
-(format t "   ├─ LW $FP $SP 4      (restaurer frame pointer)~%")
-(format t "   ├─ LW $RA $SP 0      (restaurer adresse retour)~%")
-(format t "   ├─ ADDI $SP 12 $SP   (libérer pile)~%")
-(format t "   └─ JR $RA            (retour)~%")
-
-(format t "~%7. LABEL DE FIN~%")
-(format t "   └─ FIBO_END: LI 0 $V0 (valeur par défaut)~%")
-
 (format t "~%════════════════════════════════════════════════════════════════~%")
 (format t "~%Compilation terminée avec succès!~%")
 (format t "════════════════════════════════════════════════════════════════~%~%")

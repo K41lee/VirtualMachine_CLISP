@@ -1272,6 +1272,92 @@
   t)
 
 ;;; ============================================================================
+;;; APPEL DIRECT DE FONCTIONS
+;;; ============================================================================
+
+(defparameter *vm-loaded-code* (make-hash-table)
+  "Mapping: VM → code assembleur chargé dans cette VM")
+
+(defun find-function-address (vm function-name)
+  "Trouve l'adresse d'une fonction dans le code chargé dans la VM"
+  (let ((code (gethash vm *vm-loaded-code*))
+        (code-start (calculate-code-start vm))
+        (addr 0)
+        (func-str (if (symbolp function-name)
+                      (symbol-name function-name)
+                      function-name)))
+    (unless code
+      (error "Aucun code chargé dans cette VM. Utilisez load-code d'abord."))
+    
+    (dolist (instr code)
+      (when (and (listp instr)
+                 (eq (first instr) :LABEL))
+        (let ((label-str (if (symbolp (second instr))
+                            (symbol-name (second instr))
+                            (second instr))))
+          (when (string= label-str func-str)
+            (return-from find-function-address (+ code-start addr)))))
+      (incf addr))
+    
+    (error "Fonction ~A introuvable dans le code chargé" function-name)))
+
+(defun call-function (vm function-name &rest args)
+  "Appelle une fonction chargée dans la VM avec les arguments donnés.
+   Localise automatiquement la fonction, configure les registres et exécute.
+   Retourne le résultat dans $V0.
+   
+   Exemple: (call-function vm 'FIBO 20)
+            (call-function vm 'ACK 3 4)"
+  
+  ;; Vérifier que la VM est prête
+  (unless (eq (vm-state vm) :ready)
+    (error "La VM n'est pas prête. État: ~A" (vm-state vm)))
+  
+  ;; Vérifier le nombre d'arguments (max 4 pour MIPS: $a0-$a3)
+  (when (> (length args) 4)
+    (error "Trop d'arguments (~A). Maximum: 4 (registres $a0-$a3)" (length args)))
+  
+  ;; Localiser la fonction
+  (let ((func-addr (find-function-address vm function-name)))
+    
+    (when (vm-verbose vm)
+      (format t "~%Appel de fonction: ~A(~{~A~^, ~})~%" function-name args)
+      (format t "  Adresse: ~A~%" func-addr))
+    
+    ;; Placer les arguments dans les registres $a0, $a1, $a2, $a3
+    (let ((arg-regs '(:a0 :a1 :a2 :a3)))
+      (loop for arg in args
+            for reg in arg-regs
+            do (progn
+                 (set-register vm (get-reg reg) arg)
+                 (when (vm-verbose vm)
+                   (format t "  $~A = ~A~%" 
+                           (string-upcase (symbol-name reg)) arg)))))
+    
+    ;; Configurer PC et RA
+    (set-register vm (get-reg :pc) func-addr)
+    (set-register vm (get-reg :ra) 0)  ; Retour = HALT
+    
+    (when (vm-verbose vm)
+      (format t "  $PC = ~A~%" func-addr)
+      (format t "  $RA = 0 (HALT)~%")
+      (format t "~%Exécution...~%"))
+    
+    ;; Exécuter (capture l'erreur "hors limites: 0" qui est normale)
+    (handler-case
+        (run-vm vm)
+      (error (e)
+        (let ((err-msg (format nil "~A" e)))
+          (unless (search "Adresse mémoire hors limites: 0" err-msg)
+            (error e)))))  ; Propager autres erreurs
+    
+    ;; Récupérer le résultat
+    (let ((result (get-register vm (get-reg :v0))))
+      (when (vm-verbose vm)
+        (format t "~%Résultat: ~A~%" result))
+      result)))
+
+;;; ============================================================================
 ;;; EXPORT
 ;;; ============================================================================
 
@@ -1282,4 +1368,6 @@
           vm-state vm-instruction-count vm-verbose
           get-value set-value calculate-code-start
           ;; Heap management (Phase 9)
-          reset-heap vm-malloc *heap-pointer* +heap-limit+))
+          reset-heap vm-malloc *heap-pointer* +heap-limit+
+          ;; Function calling (direct call)
+          call-function find-function-address))
